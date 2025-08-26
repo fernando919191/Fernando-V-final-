@@ -1,7 +1,9 @@
 # index.py
 import os
 import importlib
-from telegram.ext import Updater, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram import Update
+from telegram.ext import ContextTypes
 from funcionamiento.tokens import TOKENS
 from funcionamiento.config import PREFIX
 
@@ -23,38 +25,44 @@ def cargar_comandos():
     
     return comandos
 
+async def manejar_prefijos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja comandos con prefijos personalizados"""
+    text = update.message.text.lower()
+    
+    for nombre, funcion in comandos.items():
+        if text.startswith(PREFIX + nombre):
+            await funcion(update, context)
+            return
+
+async def post_init(application):
+    """Función que se ejecuta después de inicializar el bot"""
+    print("🤖 Bot iniciado correctamente!")
+
 def main():
     # Cargar comandos automáticamente
+    global comandos
     comandos = cargar_comandos()
     
     if not comandos:
         print("⚠️ No se encontraron comandos. Cerrando...")
         return
 
-    # Seleccionamos el primer token
+    # Seleccionamos el primer token - FORMA CORRECTA v20+
     token = TOKENS["BOT_1"]
-    updater = Updater(token=token, use_context=True)
-    dp = updater.dispatcher
+    
+    # Crear aplicación - NUEVA FORMA en v20+
+    application = Application.builder().token(token).post_init(post_init).build()
 
     # Registrar comandos automáticamente
     for nombre, funcion in comandos.items():
-        dp.add_handler(CommandHandler(nombre, funcion))
+        application.add_handler(CommandHandler(nombre, funcion))
         print(f"📝 Registrado comando: /{nombre}")
 
     # Manejo de prefijos personalizados
-    def manejar_prefijos(update, context):
-        text = update.message.text.lower()
-        
-        for nombre, funcion in comandos.items():
-            if text.startswith(PREFIX + nombre):
-                funcion(update, context)
-                return
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_prefijos))
 
-    dp.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_prefijos))
-
-    print("🤖 Bot iniciado correctamente!")
-    updater.start_polling()
-    updater.idle()
+    print("🚀 Iniciando bot...")
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
