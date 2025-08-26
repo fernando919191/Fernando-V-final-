@@ -7,7 +7,7 @@ async def bin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando para verificar información de BIN de tarjetas"""
     
     if not context.args:
-        await update.message.reply_text("❌ Debes proporcionar un BIN. Ejemplo: /bin 123456")
+        await update.message.reply_text("❌ Debes proporcionar un BIN. Ejemplo: /bin 416916")
         return
     
     bin_input = context.args[0].strip()
