@@ -39,18 +39,17 @@ def cargar_comandos():
     
     return comandos
 
-async def eliminar_webhook(token):
-    """Elimina cualquier webhook configurado previamente"""
-    import httpx
+def eliminar_webhook_sincrono(token):
+    """Elimina webhook de forma síncrona (sin asyncio)"""
+    import requests
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"https://api.telegram.org/bot{token}/deleteWebhook?drop_pending_updates=true"
-            )
-            if response.status_code == 200:
-                logger.info("✅ Webhook eliminado correctamente")
-            else:
-                logger.warning(f"⚠️ No se pudo eliminar webhook: {response.status_code}")
+        response = requests.get(
+            f"https://api.telegram.org/bot{token}/deleteWebhook?drop_pending_updates=true"
+        )
+        if response.status_code == 200:
+            logger.info("✅ Webhook eliminado correctamente")
+        else:
+            logger.warning(f"⚠️ No se pudo eliminar webhook: {response.status_code}")
     except Exception as e:
         logger.error(f"❌ Error eliminando webhook: {e}")
 
@@ -81,8 +80,8 @@ def main():
         token = TOKENS["BOT_1"]
         logger.info(f"🔑 Token cargado: {token[:10]}...")
         
-        # Eliminar cualquier webhook previo
-        asyncio.run(eliminar_webhook(token))
+        # Eliminar webhook de forma SÍNCRONA (evita problemas de event loop)
+        eliminar_webhook_sincrono(token)
         
         # Crear aplicación
         application = Application.builder().token(token).build()
@@ -101,23 +100,34 @@ def main():
         logger.info("🤖 Bot configurado correctamente")
         logger.info(f"📋 Comandos disponibles: {', '.join(['/' + cmd for cmd in comandos.keys()])}")
         
-        # Iniciar polling con configuración robusta
+        # Iniciar polling - FORMA CORRECTA para el event loop
         logger.info("🔄 Iniciando polling...")
-        application.run_polling(
-            poll_interval=1.0,
-            timeout=30,
-            drop_pending_updates=True,
-            allowed_updates=["message", "callback_query"]
-        )
+        
+        # Ejecutar en el event loop apropiado
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            loop.run_until_complete(application.initialize())
+            loop.run_until_complete(application.start())
+            loop.run_until_complete(application.updater.start_polling(
+                poll_interval=1.0,
+                timeout=30,
+                drop_pending_updates=True,
+                allowed_updates=["message", "callback_query"]
+            ))
+            logger.info("✅ Bot ejecutándose correctamente")
+            loop.run_forever()
+            
+        except KeyboardInterrupt:
+            logger.info("⏹️ Deteniendo bot...")
+        finally:
+            loop.run_until_complete(application.stop())
+            loop.run_until_complete(application.shutdown())
+            loop.close()
             
     except Exception as e:
         logger.error(f"❌ Error crítico al iniciar el bot: {e}", exc_info=True)
-        # Intentar cerrar recursos si es posible
-        try:
-            if 'application' in locals():
-                application.stop()
-        except:
-            pass
 
 if __name__ == "__main__":
     main()
