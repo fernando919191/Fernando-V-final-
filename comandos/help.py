@@ -9,12 +9,12 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 */start* - Iniciar el bot
 */ping* - Verificar latencia  
 */bin* <6 dígitos> - Consultar información BIN
+*/gen* - Generador de tarjetas (conversación)
 */help* - Mostrar esta ayuda
 
 💡 *Ejemplos*:
 • `/bin 416916`
 • `/ping`
-
-🔍 *Nota:* El comando BIN usa APIs públicas que pueden tener límites.
+• `/gen` - 4169167362937416|11|29
 """
     await update.message.reply_text(help_text, parse_mode='Markdown')
