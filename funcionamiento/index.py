@@ -1,7 +1,7 @@
 # funcionamiento/index.py
 
 import importlib
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram.ext import Updater, CommandHandler, MessageHandler, filters
 from funcionamiento.tokens import TOKENS
 from funcionamiento.config import PREFIX
 
@@ -24,7 +24,7 @@ def main():
         if text.startswith(PREFIX + "ping"):
             ping.ping(update, context)
 
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, prefijo))
+    dp.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, prefijo))
 
     # Iniciar bot
     updater.start_polling()
