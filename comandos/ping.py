@@ -1,12 +1,10 @@
-# comandos/ping.py
-
 from telegram import Update
-from telegram.ext import CallbackContext
+from telegram.ext import ContextTypes
 import time
 
-def ping(update: Update, context: CallbackContext):
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_time = time.time()
-    message = update.message.reply_text("Pong!")
+    message = await update.message.reply_text("🏓 Pong!")  # ✅ AÑADIDO AWAIT
     end_time = time.time()
     response_time = round((end_time - start_time) * 1000, 2)
-    message.edit_text(f"Pong! 🏓\nTiempo de respuesta: {response_time}ms")
+    await message.edit_text(f"🏓 Pong!\n⏱️ Tiempo: {response_time}ms")  # ✅ AÑADIDO AWAIT
