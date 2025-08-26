@@ -1,55 +1,97 @@
+# index.py
+import os
+import importlib
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram import Update
 from telegram.ext import ContextTypes
-import requests
-import json
+from funcionamiento.tokens import TOKENS
+import logging
+import asyncio
 
-async def bin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando para verificar información de BIN de tarjetas"""
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+def cargar_comandos():
+    """Carga automáticamente todos los comandos"""
+    comandos = {}
+    ruta_comandos = os.path.join(os.path.dirname(__file__), 'comandos')
     
-    # Verificar si se proporcionó un BIN
-    if not context.args:
-        await update.message.reply_text("❌ Debes proporcionar un BIN. Ejemplo: /bin 123456")
-        return
+    for archivo in os.listdir(ruta_comandos):
+        if archivo.endswith('.py') and archivo != '__init__.py':
+            nombre_comando = archivo[:-3]
+            try:
+                modulo = importlib.import_module(f'comandos.{nombre_comando}')
+                if hasattr(modulo, nombre_comando):
+                    comandos[nombre_comando] = getattr(modulo, nombre_comando)
+                    logger.info(f"✅ Comando cargado: {nombre_comando}")
+            except Exception as e:
+                logger.error(f"❌ Error cargando {nombre_comando}: {e}")
     
-    bin_input = context.args[0].strip()
-    
-    # Validar el BIN
-    if not bin_input.isdigit() or len(bin_input) < 6:
-        await update.message.reply_text("❌ El BIN debe ser numérico y tener al menos 6 dígitos.")
-        return
-    
+    return comandos
+
+async def eliminar_webhook(token):
+    """Elimina cualquier webhook configurado"""
+    import httpx
     try:
-        # Consultar la API de BIN
-        response = requests.get(f"https://data.handyapi.com/bin/{bin_input}")
-        response.raise_for_status()
-        api_data = response.json()
-
-        if api_data.get("Status") == "SUCCESS":
-            # Extraer información
-            pais = api_data["Country"]["Name"]
-            marca = api_data["Scheme"]
-            tipo = api_data["Type"]
-            nivel = api_data["CardTier"]
-            banco = api_data["Issuer"]
-
-            # Formatear respuesta
-            respuesta = f"""
-💳 *Información del BIN*: `{bin_input}`
-• 🏦 *Banco*: {banco}
-• 🌎 *País*: {pais}
-• 🏷️ *Marca*: {marca}
-• 🔧 *Tipo*: {tipo}
-• ⭐ *Nivel*: {nivel}
-            """
-            
-            await update.message.reply_text(respuesta, parse_mode='Markdown')
-            
-        else:
-            await update.message.reply_text("❌ BIN no válido o no encontrado.")
-
-    except requests.exceptions.RequestException as e:
-        await update.message.reply_text(f"❌ Error de conexión: {str(e)}")
-    except json.JSONDecodeError:
-        await update.message.reply_text("❌ Error al procesar la respuesta del servidor.")
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://api.telegram.org/bot{token}/deleteWebhook"
+            )
+            if response.status_code == 200:
+                logger.info("✅ Webhook eliminado correctamente")
+            else:
+                logger.warning("⚠️ No se pudo eliminar webhook")
     except Exception as e:
-        await update.message.reply_text(f"❌ Error inesperado: {str(e)}")
+        logger.error(f"❌ Error eliminando webhook: {e}")
+
+async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja mensajes de texto normales"""
+    logger.info(f"Mensaje recibido: {update.message.text}")
+    await update.message.reply_text("🤖 Bot funcionando en modo polling")
+
+def main():
+    try:
+        # Cargar comandos
+        comandos = cargar_comandos()
+        
+        if not comandos:
+            logger.error("⚠️ No se encontraron comandos")
+            return
+
+        # Obtener token
+        token = TOKENS["BOT_1"]
+        
+        # ELIMINAR CUALQUIER WEBHOOK CONFIGURADO
+        asyncio.run(eliminar_webhook(token))
+        
+        # Crear aplicación
+        application = Application.builder().token(token).build()
+
+        # Registrar comandos
+        for nombre, funcion in comandos.items():
+            application.add_handler(CommandHandler(nombre, funcion))
+            logger.info(f"📝 Registrado comando: /{nombre}")
+
+        # Manejo de mensajes de texto
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_texto))
+
+        logger.info("🚀 INICIANDO BOT EN MODO POLLING...")
+        logger.info("📋 Comandos disponibles: " + ", ".join([f"/{cmd}" for cmd in comandos.keys()]))
+        
+        # INICIAR POLLING CON CONFIGURACIÓN ROBUSTA
+        application.run_polling(
+            poll_interval=1.0,
+            timeout=25,
+            drop_pending_updates=True,
+            allowed_updates=["message", "callback_query"]
+        )
+            
+    except Exception as e:
+        logger.error(f"❌ Error crítico: {e}", exc_info=True)
+
+if __name__ == "__main__":
+    main()
