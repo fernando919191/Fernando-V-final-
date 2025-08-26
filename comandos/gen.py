@@ -1,0 +1,203 @@
+from telegram import Update
+from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
+import random
+import re
+import logging
+from datetime import datetime
+
+# Estados del flujo
+STATE_BIN, STATE_QTY, STATE_EXP, STATE_CVV = range(4)
+
+# Esquemas de marcas
+CARD_SCHEMES = {
+    "visa":       {"lengths": [16], "prefixes": ["4"], "cvv_len": 3},
+    "mastercard": {"lengths": [16], "prefixes": ["51","52","53","54","55"], "cvv_len": 3},
+    "amex":       {"lengths": [15], "prefixes": ["34","37"], "cvv_len": 4},
+    "diners":     {"lengths": [14], "prefixes": ["300","301","302","303","304","305","36","38"], "cvv_len": 3},
+    "discover":   {"lengths": [16], "prefixes": ["6011","65"], "cvv_len": 3},
+    "jcb":        {"lengths": [16], "prefixes": ["35"], "cvv_len": 3},
+}
+
+# =========================
+# Utilidades
+# =========================
+def detect_brand(bin_prefix: str):
+    for brand, data in CARD_SCHEMES.items():
+        if any(bin_prefix.startswith(pref) for pref in data["prefixes"]):
+            return brand, data["lengths"][0], data["cvv_len"]
+    return None, None, None
+
+def luhn_checksum(number: int) -> int:
+    digits = [int(d) for d in str(number)]
+    total = 0
+    for i, d in enumerate(reversed(digits)):
+        if i % 2 == 1:
+            d = d * 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10
+
+def calculate_luhn(partial: int) -> int:
+    return (10 - luhn_checksum(partial * 10)) % 10
+
+def parse_exp_input(txt: str):
+    t = txt.strip().lower()
+    if t in ["skip", "aleatorio", "random", "s", ""]:
+        return None
+
+    m = re.match(r"^(0[1-9]|1[0-2])/(?:\d{2}|\d{4})$", t)
+    if not m:
+        return "ERROR"
+
+    month = t.split("/")[0]
+    year_part = t.split("/")[1]
+    if len(year_part) == 2:
+        year4 = f"20{year_part}"
+    else:
+        year4 = year_part
+    return (month, year4)
+
+def generate_cards(bin_prefix: str, qty: int, exp_tuple, cvv_input: str | None):
+    brand, length, cvv_len = detect_brand(bin_prefix)
+    rem = length - len(bin_prefix) - 1
+    cards = []
+    for _ in range(qty):
+        middle = ''.join(str(random.randint(0, 9)) for _ in range(rem))
+        partial = int(bin_prefix + middle)
+        number = bin_prefix + middle + str(calculate_luhn(partial))
+
+        if exp_tuple is None:
+            month = f"{random.randint(1,12):02d}"
+            year4 = str(random.randint(datetime.now().year + 1, datetime.now().year + 5))
+        else:
+            month, year4 = exp_tuple
+
+        if cvv_input:
+            cvv = cvv_input
+        else:
+            cvv = ''.join(str(random.randint(0, 9)) for _ in range(cvv_len))
+
+        cards.append(f"{number}|{month}|{year4}|{cvv}")
+
+    return cards, cvv_len
+
+# =========================
+# Handlers de Conversación
+# =========================
+async def gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inicia el generador de tarjetas"""
+    await update.message.reply_text(
+        "💳 *GENERADOR DE TARJETAS*\n\n"
+        "Envía un BIN (6-8 dígitos) para comenzar.\n"
+        "O escribe /cancel para salir.",
+        parse_mode='Markdown'
+    )
+    return STATE_BIN
+
+async def bin_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    binp = update.message.text.strip()
+    if not binp.isdigit():
+        return await update.message.reply_text("❌ El BIN debe contener solo dígitos.")
+    
+    brand, length, cvv_len = detect_brand(binp)
+    if not brand:
+        return await update.message.reply_text("❌ BIN desconocido. Prueba con un BIN válido.")
+    
+    context.user_data['bin'] = binp
+    context.user_data['cvv_len'] = cvv_len
+    
+    await update.message.reply_text(
+        f"✅ *Marca detectada:* {brand.upper()}\n"
+        f"• Dígitos: {length}\n"
+        f"• CVV: {cvv_len} dígitos\n\n"
+        "¿Cuántas tarjetas deseas generar?",
+        parse_mode='Markdown'
+    )
+    return STATE_QTY
+
+async def qty_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        qty = int(update.message.text.strip())
+        if qty <= 0 or qty > 50:
+            return await update.message.reply_text("❌ La cantidad debe ser entre 1 y 50.")
+    except ValueError:
+        return await update.message.reply_text("❌ Debe ser un número entero.")
+    
+    context.user_data['qty'] = qty
+    await update.message.reply_text(
+        "📅 Ingresa fecha de expiración:\n"
+        "• Formato: MM/YY o MM/YYYY\n"
+        "• 'skip' para aleatoria\n"
+        "• /cancel para salir"
+    )
+    return STATE_EXP
+
+async def exp_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    parsed = parse_exp_input(update.message.text)
+    if parsed == "ERROR":
+        return await update.message.reply_text("❌ Formato inválido. Usa MM/YY o MM/YYYY.")
+    
+    context.user_data['exp'] = parsed
+    cvv_len = context.user_data.get('cvv_len', 3)
+    
+    await update.message.reply_text(
+        f"🔒 Ingresa CVV ({cvv_len} dígitos):\n"
+        "• 'skip' para aleatorio\n"
+        "• /cancel para salir"
+    )
+    return STATE_CVV
+
+async def cvv_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    txt = update.message.text.strip().lower()
+    cvv_len = context.user_data.get('cvv_len', 3)
+    
+    if txt in ["skip", "aleatorio", "random", "s", ""]:
+        cvv_value = None
+    else:
+        if not re.fullmatch(r"\d{"+str(cvv_len)+r"}", txt):
+            return await update.message.reply_text(f"❌ El CVV debe tener {cvv_len} dígitos.")
+        cvv_value = txt
+
+    context.user_data['cvv'] = cvv_value
+    data = context.user_data
+    
+    # Generar tarjetas
+    cards, _ = generate_cards(data['bin'], data['qty'], data['exp'], data['cvv'])
+    
+    # Enviar resultados
+    if len(cards) <= 10:
+        response = "💳 *Tarjetas generadas:*\n```\n" + "\n".join(cards) + "\n```"
+        await update.message.reply_text(response, parse_mode='Markdown')
+    else:
+        # Para muchas tarjetas, dividir en mensajes
+        for i in range(0, len(cards), 10):
+            chunk = cards[i:i+10]
+            response = f"💳 *Lote {i//10 + 1}:*\n```\n" + "\n".join(chunk) + "\n```"
+            await update.message.reply_text(response, parse_mode='Markdown')
+    
+    await update.message.reply_text("✅ Generación completada. Usa /gen para empezar de nuevo.")
+    return ConversationHandler.END
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ Operación cancelada.")
+    return ConversationHandler.END
+
+# =========================
+# Registro del comando
+# =========================
+def setup(app):
+    """Registra el comando de conversación"""
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("gen", gen)],
+        states={
+            STATE_BIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, bin_received)],
+            STATE_QTY: [MessageHandler(filters.TEXT & ~filters.COMMAND, qty_received)],
+            STATE_EXP: [MessageHandler(filters.TEXT & ~filters.COMMAND, exp_received)],
+            STATE_CVV: [MessageHandler(filters.TEXT & ~filters.COMMAND, cvv_received)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        allow_reentry=True
+    )
+    
+    return conv_handler
