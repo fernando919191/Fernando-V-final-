@@ -1,6 +1,5 @@
-# comandos/start.py
 from telegram import Update
-from telegram.ext import CallbackContext
+from telegram.ext import ContextTypes
 
-def start(update: Update, context: CallbackContext):
-    update.message.reply_text("¡Hola! Bienvenido a HellBot 🌟")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("¡Hola! Soy tu bot. Usa /help para ver comandos.")  # ✅ AWAIT
