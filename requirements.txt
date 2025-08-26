@@ -1,13 +1,22 @@
-python-telegram-bot==13.15
+# Librería principal para manejar el bot
+python-telegram-bot==20.6
+
+# HTTP requests
 requests
+
+# Para trabajar con websockets / asincronía
 aiohttp
 httpx
+
+# Manejo de entornos y variables (tokens, configs, etc.)
 python-dotenv
-pyyaml
+
+# Servidor web simple (por si usas webhooks)
+flask
+
+# Librerías de utilidades varias
 pytz
-dateparser
-beautifulsoup4
-lxml
 ujson
-pymongo
-sqlalchemy
+
+# Logs y depuración
+loguru
