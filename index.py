@@ -39,6 +39,26 @@ def cargar_comandos():
     
     return comandos
 
+def cargar_comandos_conversacion(application):
+    """Carga comandos que necesitan ConversationHandler"""
+    ruta_comandos = os.path.join(os.path.dirname(__file__), 'comandos')
+    
+    if not os.path.exists(ruta_comandos):
+        return
+    
+    for archivo in os.listdir(ruta_comandos):
+        if archivo.endswith('.py') and archivo != '__init__.py':
+            nombre_comando = archivo[:-3]
+            try:
+                modulo = importlib.import_module(f'comandos.{nombre_comando}')
+                if hasattr(modulo, 'setup'):
+                    # Comando con ConversationHandler
+                    handler = modulo.setup(application)
+                    application.add_handler(handler)
+                    logger.info(f"✅ Comando conversación cargado: /{nombre_comando}")
+            except Exception as e:
+                logger.error(f"❌ Error cargando comando conversación {nombre_comando}: {e}")
+
 def eliminar_webhook_sincrono(token):
     """Elimina webhook de forma síncrona (sin asyncio)"""
     import requests
@@ -57,7 +77,9 @@ async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_T
     """Maneja mensajes de texto normales"""
     try:
         logger.info(f"📩 Mensaje recibido: {update.message.text}")
-        await update.message.reply_text("🤖 Escribe /help para ver los comandos disponibles")
+        # Solo responder si no es un comando de conversación en progreso
+        if not context.user_data.get('in_conversation'):
+            await update.message.reply_text("🤖 Escribe /help para ver los comandos disponibles")
     except Exception as e:
         logger.error(f"❌ Error en manejar_mensajes_texto: {e}")
 
@@ -91,6 +113,9 @@ def main():
             application.add_handler(CommandHandler(nombre, funcion))
             logger.info(f"📝 Registrado comando: /{nombre}")
 
+        # Registrar comandos de conversación (como /gen)
+        cargar_comandos_conversacion(application)
+
         # Manejo de mensajes de texto normales
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_texto))
         
@@ -98,7 +123,14 @@ def main():
         application.add_error_handler(error_handler)
 
         logger.info("🤖 Bot configurado correctamente")
-        logger.info(f"📋 Comandos disponibles: {', '.join(['/' + cmd for cmd in comandos.keys()])}")
+        
+        # Obtener lista de comandos registrados
+        todos_comandos = list(comandos.keys())
+        # Agregar comandos de conversación (asumiendo que gen está presente)
+        if os.path.exists(os.path.join('comandos', 'gen.py')):
+            todos_comandos.append('gen')
+        
+        logger.info(f"📋 Comandos disponibles: {', '.join(['/' + cmd for cmd in todos_comandos])}")
         
         # Iniciar polling - FORMA CORRECTA para el event loop
         logger.info("🔄 Iniciando polling...")
