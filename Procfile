@@ -1,1 +1,1 @@
-worker: python funcionamiento/index.py
+worker: python index.py
