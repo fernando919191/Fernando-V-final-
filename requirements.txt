@@ -1,4 +1,26 @@
+# Librería principal del bot
 python-telegram-bot==13.15
+
+# Peticiones HTTP y APIs
 requests
 aiohttp
+httpx
+
+# Manejo de variables de entorno y config
 python-dotenv
+pyyaml
+
+# Utilidades varias
+pytz
+dateparser
+
+# Parsing y scraping
+beautifulsoup4
+lxml
+
+# JSON avanzado
+ujson
+
+# Extra: si en el futuro usas base de datos
+pymongo
+sqlalchemy
