@@ -5,7 +5,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram import Update
 from telegram.ext import ContextTypes
 from funcionamiento.tokens import TOKENS
-from funcionamiento.config import PREFIX
 
 def cargar_comandos():
     """Carga automáticamente todos los comandos de la carpeta 'comandos'"""
@@ -25,14 +24,10 @@ def cargar_comandos():
     
     return comandos
 
-async def manejar_prefijos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja comandos con prefijos personalizados"""
-    text = update.message.text.lower()
-    
-    for nombre, funcion in comandos.items():
-        if text.startswith(PREFIX + nombre):
-            await funcion(update, context)
-            return
+async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja mensajes de texto normales"""
+    # Puedes agregar funcionalidad aquí si necesitas procesar mensajes de texto
+    pass
 
 async def post_init(application):
     """Función que se ejecuta después de inicializar el bot"""
@@ -47,10 +42,10 @@ def main():
         print("⚠️ No se encontraron comandos. Cerrando...")
         return
 
-    # Seleccionamos el primer token - FORMA CORRECTA v20+
+    # Seleccionamos el primer token
     token = TOKENS["BOT_1"]
     
-    # Crear aplicación - NUEVA FORMA en v20+
+    # Crear aplicación
     application = Application.builder().token(token).post_init(post_init).build()
 
     # Registrar comandos automáticamente
@@ -58,8 +53,8 @@ def main():
         application.add_handler(CommandHandler(nombre, funcion))
         print(f"📝 Registrado comando: /{nombre}")
 
-    # Manejo de prefijos personalizados
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_prefijos))
+    # Manejo de mensajes de texto normales
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_texto))
 
     print("🚀 Iniciando bot...")
     application.run_polling()
