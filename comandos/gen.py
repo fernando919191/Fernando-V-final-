@@ -46,12 +46,20 @@ def parse_exp_input(txt: str):
     if t in ["skip", "aleatorio", "random", "s", ""]:
         return None
 
-    m = re.match(r"^(0[1-9]|1[0-2])/(?:\d{2}|\d{4})$", t)
+    m = re.match(r"^(0[1-9]|1[0-2])[/-]?(?:\d{2}|\d{4})$", t)
     if not m:
         return "ERROR"
 
-    month = t.split("/")[0]
-    year_part = t.split("/")[1]
+    # Extraer mes y año (acepta / o - como separador)
+    if '/' in t:
+        month, year_part = t.split('/')
+    elif '-' in t:
+        month, year_part = t.split('-')
+    else:
+        # Si no hay separador, asumimos MMYY
+        month = t[:2]
+        year_part = t[2:]
+    
     if len(year_part) == 2:
         year4 = f"20{year_part}"
     else:
@@ -83,22 +91,33 @@ def generate_cards(bin_prefix: str, qty: int, exp_tuple, cvv_input: str | None):
     return cards, cvv_len
 
 def parse_direct_command(text: str):
-    """Parsea comandos directos como: /gen 41691673|03|30"""
+    """Parsea comandos directos aceptando | o / como separadores"""
     parts = text.split()
     if len(parts) < 2:
-        return None, None, None, None
+        return None, None, None, 10  # ✅ 10 tarjetas por defecto
     
-    # Extraer parámetros
-    params = parts[1].split('|')
+    # Extraer parámetros (acepta | o / como separadores)
+    param_str = parts[1]
+    
+    # Reemplazar / por | para uniformidad
+    if '/' in param_str:
+        param_str = param_str.replace('/', '|')
+    
+    params = param_str.split('|')
     bin_input = params[0].strip()
     
     # Parámetros opcionales
     exp_input = params[1] if len(params) > 1 else None
     cvv_input = params[2] if len(params) > 2 else None
-    qty_input = int(params[3]) if len(params) > 3 and params[3].isdigit() else 1
     
-    # Validar cantidad
-    qty_input = max(1, min(qty_input, 20))  # Límite de 20 tarjetas
+    # Cantidad - por defecto 10 tarjetas
+    if len(params) > 3 and params[3].isdigit():
+        qty_input = int(params[3])
+    else:
+        qty_input = 10  # ✅ 10 tarjetas por defecto
+    
+    # Validar cantidad (máximo 20)
+    qty_input = max(1, min(qty_input, 20))
     
     return bin_input, exp_input, cvv_input, qty_input
 
@@ -113,7 +132,15 @@ async def gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
             bin_input, exp_input, cvv_input, qty = parse_direct_command(update.message.text)
             
             if not bin_input:
-                await update.message.reply_text("❌ Formato incorrecto. Usa: `/gen BIN|MM|YY|CVV|cantidad`", parse_mode='Markdown')
+                await update.message.reply_text(
+                    "❌ Formato incorrecto. Usa:\n"
+                    "• `/gen BIN` - 10 tarjetas aleatorias\n"
+                    "• `/gen BIN|MM|YY` - Con expiración\n"
+                    "• `/gen BIN|MM|YY|CVV` - Con CVV\n"
+                    "• `/gen BIN|MM|YY|CVV|cantidad` - Cantidad específica\n\n"
+                    "💡 También puedes usar `/` en lugar de `|`",
+                    parse_mode='Markdown'
+                )
                 return
             
             # Validar BIN
@@ -131,7 +158,7 @@ async def gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if exp_input:
                 parsed = parse_exp_input(exp_input)
                 if parsed == "ERROR":
-                    await update.message.reply_text("❌ Formato de fecha inválido. Usa MM/YY.")
+                    await update.message.reply_text("❌ Formato de fecha inválido. Usa MM/YY o MM-YY.")
                     return
                 exp_tuple = parsed
             
@@ -155,7 +182,12 @@ async def gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "💳 *GENERADOR DE TARJETAS*\n\n"
             "Envía un BIN (6-8 dígitos) para comenzar.\n"
-            "O usa: `/gen BIN|MM|YY|CVV|cantidad` para modo directo\n"
+            "O usa modo directo:\n"
+            "• `/gen BIN` - 10 tarjetas\n"
+            "• `/gen BIN/MM/YY` - Con fecha\n"
+            "• `/gen BIN/MM/YY/CVV` - Con CVV\n"
+            "• `/gen BIN/MM/YY/CVV/cantidad` - Especificar cantidad\n\n"
+            "💡 Puedes usar `|` o `/` como separadores\n"
             "Escribe /cancel para salir.",
             parse_mode='Markdown'
         )
@@ -181,32 +213,41 @@ async def bin_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ *Marca detectada:* {brand.upper()}\n"
         f"• Dígitos: {length}\n"
         f"• CVV: {cvv_len} dígitos\n\n"
-        "¿Cuántas tarjetas deseas generar? (1-20)",
+        "¿Cuántas tarjetas deseas generar? (1-20)\n"
+        "💡 Por defecto: 10 tarjetas",
         parse_mode='Markdown'
     )
     return STATE_QTY
 
 async def qty_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        qty = int(update.message.text.strip())
-        if qty <= 0 or qty > 20:
-            return await update.message.reply_text("❌ La cantidad debe ser entre 1 y 20.")
+        if update.message.text.strip() == "":
+            qty = 10  # ✅ Valor por defecto
+        else:
+            qty = int(update.message.text.strip())
+            if qty <= 0 or qty > 20:
+                return await update.message.reply_text("❌ La cantidad debe ser entre 1 y 20.")
     except ValueError:
         return await update.message.reply_text("❌ Debe ser un número entero.")
     
     context.user_data['qty'] = qty
     await update.message.reply_text(
         "📅 Ingresa fecha de expiración:\n"
-        "• Formato: MM/YY\n"
+        "• Formato: MM/YY o MM-YY\n"
         "• 'skip' para aleatoria\n"
+        "• Enter para aleatoria\n"
         "• /cancel para salir"
     )
     return STATE_EXP
 
 async def exp_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    parsed = parse_exp_input(update.message.text)
-    if parsed == "ERROR":
-        return await update.message.reply_text("❌ Formato inválido. Usa MM/YY o escribe 'skip'.")
+    txt = update.message.text.strip()
+    if txt == "":
+        parsed = None  # ✅ Aleatorio por defecto
+    else:
+        parsed = parse_exp_input(txt)
+        if parsed == "ERROR":
+            return await update.message.reply_text("❌ Formato inválido. Usa MM/YY, MM-YY o escribe 'skip'.")
     
     context.user_data['exp'] = parsed
     cvv_len = context.user_data.get('cvv_len', 3)
@@ -214,6 +255,7 @@ async def exp_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🔒 Ingresa CVV ({cvv_len} dígitos):\n"
         "• 'skip' para aleatorio\n"
+        "• Enter para aleatorio\n"
         "• /cancel para salir"
     )
     return STATE_CVV
@@ -232,8 +274,9 @@ async def cvv_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['cvv'] = cvv_value
     data = context.user_data
     
-    # Generar tarjetas
-    cards, _ = generate_cards(data['bin'], data['qty'], data['exp'], data['cvv'])
+    # Generar tarjetas (10 por defecto si no se especifica)
+    qty = data.get('qty', 10)
+    cards, _ = generate_cards(data['bin'], qty, data['exp'], data['cvv'])
     
     # Enviar resultados
     response = f"💳 *{len(cards)} tarjeta(s) generada(s):*\n```\n" + "\n".join(cards) + "\n```"
