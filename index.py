@@ -74,12 +74,12 @@ def eliminar_webhook_sincrono(token):
         logger.error(f"❌ Error eliminando webhook: {e}")
 
 async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja mensajes de texto normales"""
+    """Maneja mensajes de texto normales - SIN RESPUESTA AUTOMÁTICA"""
     try:
         logger.info(f"📩 Mensaje recibido: {update.message.text}")
-        # Solo responder si no es un comando de conversación en progreso
-        if not context.user_data.get('in_conversation'):
-            await update.message.reply_text("🤖 Escribe /help para ver los comandos disponibles")
+        # ✅ NO respondemos automáticamente para no interferir con conversaciones
+        # Los comandos de conversación se encargarán de responder cuando sea necesario
+        pass
     except Exception as e:
         logger.error(f"❌ Error en manejar_mensajes_texto: {e}")
 
@@ -116,7 +116,7 @@ def main():
         # Registrar comandos de conversación (como /gen)
         cargar_comandos_conversacion(application)
 
-        # Manejo de mensajes de texto normales
+        # Manejo de mensajes de texto normales (SIN respuesta automática)
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_texto))
         
         # Manejo de errores globales
