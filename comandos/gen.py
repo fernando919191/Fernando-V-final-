@@ -5,7 +5,7 @@ import re
 import logging
 from datetime import datetime
 
-# Estados del flujo
+# Estados del flujo (para modo conversación)
 STATE_BIN, STATE_QTY, STATE_EXP, STATE_CVV = range(4)
 
 # Esquemas de marcas
@@ -82,19 +82,89 @@ def generate_cards(bin_prefix: str, qty: int, exp_tuple, cvv_input: str | None):
 
     return cards, cvv_len
 
+def parse_direct_command(text: str):
+    """Parsea comandos directos como: /gen 41691673|03|30"""
+    parts = text.split()
+    if len(parts) < 2:
+        return None, None, None, None
+    
+    # Extraer parámetros
+    params = parts[1].split('|')
+    bin_input = params[0].strip()
+    
+    # Parámetros opcionales
+    exp_input = params[1] if len(params) > 1 else None
+    cvv_input = params[2] if len(params) > 2 else None
+    qty_input = int(params[3]) if len(params) > 3 and params[3].isdigit() else 1
+    
+    # Validar cantidad
+    qty_input = max(1, min(qty_input, 20))  # Límite de 20 tarjetas
+    
+    return bin_input, exp_input, cvv_input, qty_input
+
 # =========================
-# Handlers de Conversación
+# Handlers Principales
 # =========================
 async def gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Inicia el generador de tarjetas"""
-    await update.message.reply_text(
-        "💳 *GENERADOR DE TARJETAS*\n\n"
-        "Envía un BIN (6-8 dígitos) para comenzar.\n"
-        "O escribe /cancel para salir.",
-        parse_mode='Markdown'
-    )
-    return STATE_BIN
+    """Maneja /gen con parámetros directos o inicia conversación"""
+    if context.args:
+        # Modo directo: /gen 41691673|03|30|5
+        try:
+            bin_input, exp_input, cvv_input, qty = parse_direct_command(update.message.text)
+            
+            if not bin_input:
+                await update.message.reply_text("❌ Formato incorrecto. Usa: `/gen BIN|MM|YY|CVV|cantidad`", parse_mode='Markdown')
+                return
+            
+            # Validar BIN
+            if not bin_input.isdigit():
+                await update.message.reply_text("❌ El BIN debe contener solo dígitos.")
+                return
+            
+            brand, length, cvv_len = detect_brand(bin_input)
+            if not brand:
+                await update.message.reply_text("❌ BIN desconocido. Prueba con un BIN válido.")
+                return
+            
+            # Procesar expiración
+            exp_tuple = None
+            if exp_input:
+                parsed = parse_exp_input(exp_input)
+                if parsed == "ERROR":
+                    await update.message.reply_text("❌ Formato de fecha inválido. Usa MM/YY.")
+                    return
+                exp_tuple = parsed
+            
+            # Validar CVV
+            if cvv_input and (not cvv_input.isdigit() or len(cvv_input) != cvv_len):
+                await update.message.reply_text(f"❌ CVV debe tener {cvv_len} dígitos.")
+                return
+            
+            # Generar tarjetas
+            cards, _ = generate_cards(bin_input, qty, exp_tuple, cvv_input)
+            
+            # Enviar resultados
+            response = f"💳 *{len(cards)} tarjeta(s) generada(s):*\n```\n" + "\n".join(cards) + "\n```"
+            await update.message.reply_text(response, parse_mode='Markdown')
+            
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+    
+    else:
+        # Modo conversación
+        await update.message.reply_text(
+            "💳 *GENERADOR DE TARJETAS*\n\n"
+            "Envía un BIN (6-8 dígitos) para comenzar.\n"
+            "O usa: `/gen BIN|MM|YY|CVV|cantidad` para modo directo\n"
+            "Escribe /cancel para salir.",
+            parse_mode='Markdown'
+        )
+        context.user_data['in_conversation'] = True
+        return STATE_BIN
 
+# =========================
+# Handlers de Conversación (modo interactivo)
+# =========================
 async def bin_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     binp = update.message.text.strip()
     if not binp.isdigit():
@@ -111,7 +181,7 @@ async def bin_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ *Marca detectada:* {brand.upper()}\n"
         f"• Dígitos: {length}\n"
         f"• CVV: {cvv_len} dígitos\n\n"
-        "¿Cuántas tarjetas deseas generar?",
+        "¿Cuántas tarjetas deseas generar? (1-20)",
         parse_mode='Markdown'
     )
     return STATE_QTY
@@ -119,15 +189,15 @@ async def bin_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def qty_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         qty = int(update.message.text.strip())
-        if qty <= 0 or qty > 50:
-            return await update.message.reply_text("❌ La cantidad debe ser entre 1 y 50.")
+        if qty <= 0 or qty > 20:
+            return await update.message.reply_text("❌ La cantidad debe ser entre 1 y 20.")
     except ValueError:
         return await update.message.reply_text("❌ Debe ser un número entero.")
     
     context.user_data['qty'] = qty
     await update.message.reply_text(
         "📅 Ingresa fecha de expiración:\n"
-        "• Formato: MM/YY o MM/YYYY\n"
+        "• Formato: MM/YY\n"
         "• 'skip' para aleatoria\n"
         "• /cancel para salir"
     )
@@ -136,7 +206,7 @@ async def qty_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def exp_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parsed = parse_exp_input(update.message.text)
     if parsed == "ERROR":
-        return await update.message.reply_text("❌ Formato inválido. Usa MM/YY o MM/YYYY.")
+        return await update.message.reply_text("❌ Formato inválido. Usa MM/YY o escribe 'skip'.")
     
     context.user_data['exp'] = parsed
     cvv_len = context.user_data.get('cvv_len', 3)
@@ -166,21 +236,16 @@ async def cvv_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cards, _ = generate_cards(data['bin'], data['qty'], data['exp'], data['cvv'])
     
     # Enviar resultados
-    if len(cards) <= 10:
-        response = "💳 *Tarjetas generadas:*\n```\n" + "\n".join(cards) + "\n```"
-        await update.message.reply_text(response, parse_mode='Markdown')
-    else:
-        # Para muchas tarjetas, dividir en mensajes
-        for i in range(0, len(cards), 10):
-            chunk = cards[i:i+10]
-            response = f"💳 *Lote {i//10 + 1}:*\n```\n" + "\n".join(chunk) + "\n```"
-            await update.message.reply_text(response, parse_mode='Markdown')
+    response = f"💳 *{len(cards)} tarjeta(s) generada(s):*\n```\n" + "\n".join(cards) + "\n```"
+    await update.message.reply_text(response, parse_mode='Markdown')
     
-    await update.message.reply_text("✅ Generación completada. Usa /gen para empezar de nuevo.")
+    # Limpiar estado de conversación
+    context.user_data.pop('in_conversation', None)
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Operación cancelada.")
+    context.user_data.pop('in_conversation', None)
     return ConversationHandler.END
 
 # =========================
