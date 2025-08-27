@@ -15,6 +15,6 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💡 *Ejemplos*:
 • `/bin 416916`
 • `/ping`
-• `/gen` - 4169167362937416|11|29
+• `/gen` - 4169167362|11|29
 """
     await update.message.reply_text(help_text, parse_mode='Markdown')
