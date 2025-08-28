@@ -18,19 +18,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ID de usuario administrador principal
+ADMIN_PRINCIPAL = "6751216122"
+
 def comando_con_licencia(func):
     """Decorador para verificar licencia antes de ejecutar un comando"""
     async def wrapper(update, context):
-        user_id = update.effective_user.id
-        
-        # Permitir siempre los comandos /key y /start sin verificación de licencia
+        user_id = str(update.effective_user.id)
         command_name = func.__name__
-        if command_name not in ['key', 'start'] and not usuario_tiene_licencia_activa(user_id):
+        
+        # Permitir siempre estos comandos sin verificación de licencia
+        comandos_permitidos_sin_licencia = ['key', 'start', 'addkeys']
+        
+        if command_name not in comandos_permitidos_sin_licencia and not usuario_tiene_licencia_activa(user_id):
             await update.message.reply_text(
                 "❌ No tienes una licencia activa.\n\n"
                 "Usa /key <clave> para canjear una licencia.\n"
                 "Contacta con un administrador si necesitas una clave."
             )
+            return
+        
+        # Verificación especial para addkeys - solo el admin principal puede usarlo
+        if command_name == 'addkeys' and user_id != ADMIN_PRINCIPAL:
+            await update.message.reply_text("❌ No tienes permisos para usar este comando.")
             return
         
         # Si tiene licencia o es un comando permitido, ejecutar la función
@@ -102,7 +112,7 @@ def eliminar_webhook_sincrono(token):
 async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja mensajes de texto normales con verificación de licencia"""
     try:
-        user_id = update.effective_user.id
+        user_id = str(update.effective_user.id)
         message_text = update.message.text
         
         logger.info(f"📩 Mensaje recibido de {user_id}: {message_text}")
@@ -110,11 +120,9 @@ async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_T
         # Verificar si el usuario tiene licencia activa
         if not usuario_tiene_licencia_activa(user_id):
             # Permitir solo los comandos esenciales sin licencia
-            if message_text.startswith('/key ') or message_text == '/key':
-                # Permitir que el comando /key se procese normalmente
-                return
-            elif message_text.startswith('/start') or message_text == '/start':
-                # Permitir que el comando /start se procese normalmente
+            comandos_permitidos = ['/key', '/start', '/addkeys']
+            if any(message_text.startswith(cmd) for cmd in comandos_permitidos):
+                # Permitir que estos comandos se procesen normalmente
                 return
             else:
                 # Bloquear otros mensajes si no tiene licencia
