@@ -1,7 +1,6 @@
 import json
 import os
 from datetime import datetime
-from .licencias import usuario_tiene_licencia_activa
 
 # Ruta al archivo de usuarios
 USUARIOS_FILE = os.path.join(os.path.dirname(__file__), '..', 'usuarios.json')
@@ -36,25 +35,26 @@ def registrar_usuario(user_id, username=None, first_name=None, last_name=None):
         }
     else:
         # Actualizar información existente
-        usuarios[user_id]['username'] = username
-        usuarios[user_id]['first_name'] = first_name
-        usuarios[user_id]['last_name'] = last_name
+        if username is not None:
+            usuarios[user_id]['username'] = username
+        if first_name is not None:
+            usuarios[user_id]['first_name'] = first_name
+        if last_name is not None:
+            usuarios[user_id]['last_name'] = last_name
     
     guardar_usuarios(usuarios)
     return usuarios[user_id]
 
-def actualizar_estado_licencia(user_id):
+def actualizar_estado_licencia(user_id, tiene_licencia):
     """Actualiza el estado de licencia de un usuario"""
     user_id = str(user_id)
     usuarios = cargar_usuarios()
     
     if user_id in usuarios:
-        tiene_licencia = usuario_tiene_licencia_activa(user_id)
         usuarios[user_id]['tiene_licencia'] = tiene_licencia
         usuarios[user_id]['ultima_verificacion'] = datetime.now().isoformat()
-        
         guardar_usuarios(usuarios)
-        return tiene_licencia
+        return True
     
     return False
 
