@@ -1,12 +1,12 @@
-from telegram import Update
-from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
 import random
 import re
 import logging
 from datetime import datetime
+from telegram import Update
+from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
 
 # Estados del flujo
-STATE_BIN, STATE_QTY, STATE_EXP, STATE_CVV = range(4)
+STATE_BIN, STATE_EXP, STATE_CVV = range(3)
 
 # Esquemas de marcas
 CARD_SCHEMES = {
@@ -42,6 +42,12 @@ def calculate_luhn(partial: int) -> int:
     return (10 - luhn_checksum(partial * 10)) % 10
 
 def parse_exp_input(txt: str):
+    """
+    Acepta:
+      - 'skip' / 'aleatorio' / 'random' / 's' -> None (aleatorio)
+      - 'MM/YY'  -> retorna ('MM', 'YYYY')
+      - 'MM/YYYY'-> retorna ('MM', 'YYYY')
+    """
     t = txt.strip().lower()
     if t in ["skip", "aleatorio", "random", "s", ""]:
         return None
@@ -53,6 +59,7 @@ def parse_exp_input(txt: str):
     month = t.split("/")[0]
     year_part = t.split("/")[1]
     if len(year_part) == 2:
+        # Normalizamos a 4 dígitos (asumimos 2000-2099)
         year4 = f"20{year_part}"
     else:
         year4 = year_part
@@ -67,132 +74,109 @@ def generate_cards(bin_prefix: str, qty: int, exp_tuple, cvv_input: str | None):
         partial = int(bin_prefix + middle)
         number = bin_prefix + middle + str(calculate_luhn(partial))
 
+        # Expiración
         if exp_tuple is None:
             month = f"{random.randint(1,12):02d}"
             year4 = str(random.randint(datetime.now().year + 1, datetime.now().year + 5))
         else:
-            month, year4 = exp_tuple
+            month, year4 = exp_tuple  # ya viene normalizado a YYYY
 
+        # CVV
         if cvv_input:
             cvv = cvv_input
         else:
             cvv = ''.join(str(random.randint(0, 9)) for _ in range(cvv_len))
 
+        # Salida en formato NUM|MM|YYYY|CVV
         cards.append(f"{number}|{month}|{year4}|{cvv}")
 
     return cards, cvv_len
 
 # =========================
-# Handlers de Conversación
+# Handlers de Telegram
 # =========================
-async def gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Inicia el generador de tarjetas"""
-    await update.message.reply_text(
-        "💳 *GENERADOR DE TARJETAS*\n\n"
-        "Envía un BIN (6-8 dígitos) para comenzar.\n"
-        "O escribe /cancel para salir.",
-        parse_mode='Markdown'
-    )
+async def gen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Inicia el proceso de generación de tarjetas"""
+    # Verificar licencia primero (esto se maneja automáticamente por el decorador)
+    await update.message.reply_text("💳 **Generador de Tarjetas**\n\nEnvía un BIN (6-8 dígitos) para comenzar.")
     return STATE_BIN
 
-async def bin_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def bin_received(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     binp = update.message.text.strip()
     if not binp.isdigit():
-        return await update.message.reply_text("❌ El BIN debe contener solo dígitos.")
+        return await update.message.reply_text("❌ El BIN debe contener solo dígitos. Intenta de nuevo.")
+    
+    if len(binp) < 6 or len(binp) > 8:
+        return await update.message.reply_text("❌ El BIN debe tener entre 6 y 8 dígitos. Intenta de nuevo.")
     
     brand, length, cvv_len = detect_brand(binp)
     if not brand:
         return await update.message.reply_text("❌ BIN desconocido. Prueba con un BIN válido.")
     
-    context.user_data['bin'] = binp
-    context.user_data['cvv_len'] = cvv_len
+    ctx.user_data['bin'] = binp
+    ctx.user_data['cvv_len'] = cvv_len
     
     await update.message.reply_text(
-        f"✅ *Marca detectada:* {brand.upper()}\n"
-        f"• Dígitos: {length}\n"
-        f"• CVV: {cvv_len} dígitos\n\n"
-        "¿Cuántas tarjetas deseas generar?",
-        parse_mode='Markdown'
-    )
-    return STATE_QTY
-
-async def qty_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        qty = int(update.message.text.strip())
-        if qty <= 0 or qty > 50:
-            return await update.message.reply_text("❌ La cantidad debe ser entre 1 y 50.")
-    except ValueError:
-        return await update.message.reply_text("❌ Debe ser un número entero.")
-    
-    context.user_data['qty'] = qty
-    await update.message.reply_text(
-        "📅 Ingresa fecha de expiración:\n"
-        "• Formato: MM/YY o MM/YYYY\n"
-        "• 'skip' para aleatoria\n"
-        "• /cancel para salir"
+        f"✅ **Marca detectada:** {brand.upper()}\n"
+        f"📏 **Dígitos:** {length}\n"
+        f"🔢 **CVV:** {cvv_len} dígitos\n\n"
+        "📅 Ingresa fecha de expiración (MM/YY o MM/YYYY) o escribe 'skip' para aleatoria."
     )
     return STATE_EXP
 
-async def exp_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def exp_received(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     parsed = parse_exp_input(update.message.text)
     if parsed == "ERROR":
-        return await update.message.reply_text("❌ Formato inválido. Usa MM/YY o MM/YYYY.")
+        return await update.message.reply_text("❌ Formato inválido. Usa MM/YY o MM/YYYY, o escribe 'skip'.")
     
-    context.user_data['exp'] = parsed
-    cvv_len = context.user_data.get('cvv_len', 3)
+    ctx.user_data['exp'] = parsed  # None o (MM, YYYY)
+    cvv_len = ctx.user_data.get('cvv_len', 3)
     
     await update.message.reply_text(
-        f"🔒 Ingresa CVV ({cvv_len} dígitos):\n"
-        "• 'skip' para aleatorio\n"
-        "• /cancel para salir"
+        f"🔢 Ingresa CVV ({cvv_len} dígitos) o escribe 'skip' para aleatorio."
     )
     return STATE_CVV
 
-async def cvv_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cvv_received(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text.strip().lower()
-    cvv_len = context.user_data.get('cvv_len', 3)
+    cvv_len = ctx.user_data.get('cvv_len', 3)
     
     if txt in ["skip", "aleatorio", "random", "s", ""]:
         cvv_value = None
     else:
-        if not re.fullmatch(r"\d{"+str(cvv_len)+r"}", txt):
-            return await update.message.reply_text(f"❌ El CVV debe tener {cvv_len} dígitos.")
+        if not re.fullmatch(r"\d{" + str(cvv_len) + r"}", txt):
+            return await update.message.reply_text(f"❌ El CVV debe tener {cvv_len} dígitos o escribe 'skip'.")
         cvv_value = txt
 
-    context.user_data['cvv'] = cvv_value
-    data = context.user_data
+    ctx.user_data['cvv'] = cvv_value
+    data = ctx.user_data
     
-    # Generar tarjetas
-    cards, _ = generate_cards(data['bin'], data['qty'], data['exp'], data['cvv'])
+    # Generar 10 tarjetas (cantidad fija)
+    cards, _ = generate_cards(data['bin'], 10, data['exp'], data['cvv'])
     
-    # Enviar resultados
-    if len(cards) <= 10:
-        response = "💳 *Tarjetas generadas:*\n```\n" + "\n".join(cards) + "\n```"
-        await update.message.reply_text(response, parse_mode='Markdown')
+    # Enviar las tarjetas generadas
+    resultado = "💳 **Tarjetas Generadas:**\n\n" + "\n".join(cards)
+    
+    # Dividir el mensaje si es muy largo (límite de Telegram: 4096 caracteres)
+    if len(resultado) > 4000:
+        partes = [resultado[i:i+4000] for i in range(0, len(resultado), 4000)]
+        for parte in partes:
+            await update.message.reply_text(parte)
     else:
-        # Para muchas tarjetas, dividir en mensajes
-        for i in range(0, len(cards), 10):
-            chunk = cards[i:i+10]
-            response = f"💳 *Lote {i//10 + 1}:*\n```\n" + "\n".join(chunk) + "\n```"
-            await update.message.reply_text(response, parse_mode='Markdown')
+        await update.message.reply_text(resultado)
     
-    await update.message.reply_text("✅ Generación completada. Usa /gen para empezar de nuevo.")
     return ConversationHandler.END
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Operación cancelada.")
     return ConversationHandler.END
 
-# =========================
-# Registro del comando
-# =========================
-def setup(app):
-    """Registra el comando de conversación"""
+def setup(application):
+    """Configura el ConversationHandler para el comando /gen"""
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("gen", gen)],
         states={
             STATE_BIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, bin_received)],
-            STATE_QTY: [MessageHandler(filters.TEXT & ~filters.COMMAND, qty_received)],
             STATE_EXP: [MessageHandler(filters.TEXT & ~filters.COMMAND, exp_received)],
             STATE_CVV: [MessageHandler(filters.TEXT & ~filters.COMMAND, cvv_received)],
         },
