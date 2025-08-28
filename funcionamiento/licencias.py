@@ -19,7 +19,7 @@ def guardar_licencias(licencias):
         json.dump(licencias, f, indent=4)
 
 def usuario_tiene_licencia_activa(user_id):
-    """Verifica si un usuario tiene una licencia activa"""
+    """Verifica si un usuario tiene una licencia activa - CORREGIDO"""
     user_id = str(user_id)
     licencias = cargar_licencias()
     
@@ -34,10 +34,14 @@ def usuario_tiene_licencia_activa(user_id):
             try:
                 expiracion_str = datos.get('expiracion')
                 if expiracion_str and expiracion_str != 'permanente':
+                    # Asegurar el formato correcto de la fecha
+                    if 'T' not in expiracion_str:
+                        expiracion_str += 'T00:00:00'
                     expiracion = datetime.fromisoformat(expiracion_str)
                     if datetime.now() < expiracion:
                         return True
-            except (ValueError, TypeError):
+            except (ValueError, TypeError) as e:
+                print(f"Error al parsear fecha: {e}")
                 continue
     
     return False
@@ -59,7 +63,7 @@ def obtener_licencias_usuario(user_id):
     return licencias_usuario
 
 def canjear_licencia(clave, user_id):
-    """Canjea una licencia y devuelve (éxito, mensaje)"""
+    """Canjea una licencia y devuelve (éxito, mensaje) - CORREGIDO"""
     user_id = str(user_id)
     licencias = cargar_licencias()
     
@@ -73,11 +77,14 @@ def canjear_licencia(clave, user_id):
     if expiracion != 'permanente':
         try:
             if expiracion:
+                # Asegurar el formato correcto de la fecha
+                if 'T' not in expiracion:
+                    expiracion += 'T00:00:00'
                 expiracion_dt = datetime.fromisoformat(expiracion)
                 if datetime.now() > expiracion_dt:
                     return False, "Esta clave ha expirado."
-        except (ValueError, TypeError):
-            return False, "Error en el formato de expiración."
+        except (ValueError, TypeError) as e:
+            return False, f"Error en el formato de expiración: {e}"
     
     # Canjear la clave
     licencias[clave]['usada'] = True
