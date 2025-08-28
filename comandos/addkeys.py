@@ -5,15 +5,6 @@ from datetime import datetime, timedelta
 
 # Ruta al archivo de licencias
 LICENCIAS_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'licencias.json')
-ADMINS_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'admins.txt')
-
-def cargar_admins():
-    """Carga la lista de administradores desde el archivo"""
-    try:
-        with open(ADMINS_FILE, 'r') as f:
-            return [line.strip() for line in f.readlines()]
-    except FileNotFoundError:
-        return []
 
 def cargar_licencias():
     """Carga las licencias desde el archivo JSON"""
@@ -30,13 +21,8 @@ def guardar_licencias(licencias):
 
 async def addkeys(update, context):
     """Comando para agregar claves de licencia"""
-    user_id = str(update.effective_user.id)
-    admins = cargar_admins()
-    
-    # Verificar si el usuario es admin
-    if user_id not in admins:
-        await update.message.reply_text("❌ No tienes permisos para usar este comando.")
-        return
+    # NOTA: La verificación de permisos ahora se hace en el decorador comando_con_licencia
+    # en index.py, por lo que eliminamos la verificación duplicada aquí
     
     # Verificar los argumentos
     if len(context.args) < 2:
