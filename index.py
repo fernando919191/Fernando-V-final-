@@ -8,12 +8,35 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from funcionamiento.tokens import TOKENS
 
+# Importar la función de verificación de licencias
+from funcionamiento.licencias import usuario_tiene_licencia_activa
+
 # Configurar logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def comando_con_licencia(func):
+    """Decorador para verificar licencia antes de ejecutar un comando"""
+    async def wrapper(update, context):
+        user_id = update.effective_user.id
+        
+        # Permitir siempre los comandos /key y /start sin verificación de licencia
+        command_name = func.__name__
+        if command_name not in ['key', 'start'] and not usuario_tiene_licencia_activa(user_id):
+            await update.message.reply_text(
+                "❌ No tienes una licencia activa.\n\n"
+                "Usa /key <clave> para canjear una licencia.\n"
+                "Contacta con un administrador si necesitas una clave."
+            )
+            return
+        
+        # Si tiene licencia o es un comando permitido, ejecutar la función
+        return await func(update, context)
+    
+    return wrapper
 
 def cargar_comandos():
     """Carga automáticamente todos los comandos de la carpeta 'comandos'"""
@@ -30,8 +53,11 @@ def cargar_comandos():
             try:
                 modulo = importlib.import_module(f'comandos.{nombre_comando}')
                 if hasattr(modulo, nombre_comando):
-                    comandos[nombre_comando] = getattr(modulo, nombre_comando)
-                    logger.info(f"✅ Comando cargado: {nombre_comando}")
+                    # Aplicar el decorador de verificación de licencia
+                    funcion_original = getattr(modulo, nombre_comando)
+                    funcion_con_licencia = comando_con_licencia(funcion_original)
+                    comandos[nombre_comando] = funcion_con_licencia
+                    logger.info(f"✅ Comando cargado: {nombre_comando} (con verificación de licencia)")
                 else:
                     logger.warning(f"⚠️ Función {nombre_comando} no encontrada en {archivo}")
             except Exception as e:
@@ -74,12 +100,34 @@ def eliminar_webhook_sincrono(token):
         logger.error(f"❌ Error eliminando webhook: {e}")
 
 async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja mensajes de texto normales - SIN RESPUESTA AUTOMÁTICA"""
+    """Maneja mensajes de texto normales con verificación de licencia"""
     try:
-        logger.info(f"📩 Mensaje recibido: {update.message.text}")
-        # ✅ NO respondemos automáticamente para no interferir con conversaciones
-        # Los comandos de conversación se encargarán de responder cuando sea necesario
-        pass
+        user_id = update.effective_user.id
+        message_text = update.message.text
+        
+        logger.info(f"📩 Mensaje recibido de {user_id}: {message_text}")
+        
+        # Verificar si el usuario tiene licencia activa
+        if not usuario_tiene_licencia_activa(user_id):
+            # Permitir solo los comandos esenciales sin licencia
+            if message_text.startswith('/key ') or message_text == '/key':
+                # Permitir que el comando /key se procese normalmente
+                return
+            elif message_text.startswith('/start') or message_text == '/start':
+                # Permitir que el comando /start se procese normalmente
+                return
+            else:
+                # Bloquear otros mensajes si no tiene licencia
+                await update.message.reply_text(
+                    "❌ No tienes una licencia activa.\n\n"
+                    "Usa /key <clave> para canjear una licencia.\n"
+                    "Contacta con un administrador si necesitas una clave."
+                )
+                return
+        
+        # Si tiene licencia, procesar el mensaje normalmente
+        # (aquí puedes agregar cualquier lógica adicional para mensajes con licencia)
+        
     except Exception as e:
         logger.error(f"❌ Error en manejar_mensajes_texto: {e}")
 
@@ -116,7 +164,7 @@ def main():
         # Registrar comandos de conversación (como /gen)
         cargar_comandos_conversacion(application)
 
-        # Manejo de mensajes de texto normales (SIN respuesta automática)
+        # Manejo de mensajes de texto normales (con verificación de licencia)
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_texto))
         
         # Manejo de errores globales
