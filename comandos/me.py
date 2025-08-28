@@ -1,4 +1,4 @@
-from funcionamiento.usuarios import obtener_usuario
+from funcionamiento.usuarios import obtener_usuario, registrar_usuario
 from funcionamiento.licencias import obtener_licencias_usuario, usuario_tiene_licencia_activa
 from datetime import datetime
 
@@ -9,10 +9,17 @@ async def me(update, context):
     first_name = update.effective_user.first_name
     last_name = update.effective_user.last_name
     
-    # Obtener información de la base de datos (esto actualizará el estado de licencia)
+    # Registrar al usuario si no existe (esto crea el registro aunque no tenga licencia)
+    registrar_usuario(user_id, username, first_name, last_name)
+    
+    # Obtener información de la base de datos
     usuario_info = obtener_usuario(user_id)
     tiene_licencia = usuario_tiene_licencia_activa(user_id)
-    licencias = obtener_licencias_usuario(user_id)
+    
+    # Solo intentar obtener licencias si el usuario tiene licencia activa
+    licencias = []
+    if tiene_licencia:
+        licencias = obtener_licencias_usuario(user_id)
     
     # Construir mensaje
     mensaje = "👤 **Tu información**\n\n"
@@ -27,7 +34,7 @@ async def me(update, context):
     if username:
         mensaje += f"📛 **Usuario:** @{username}\n"
     
-    # Estado de licencia (verificación en tiempo real)
+    # Estado de licencia
     estado_licencia = "✅ **Licencia:** ACTIVA" if tiene_licencia else "❌ **Licencia:** INACTIVA"
     mensaje += f"{estado_licencia}\n"
     
@@ -39,7 +46,7 @@ async def me(update, context):
         except (ValueError, TypeError):
             pass
     
-    # Información de licencias
+    # Información de licencias (solo si tiene licencias)
     if licencias:
         mensaje += "\n🔑 **Tus licencias:**\n"
         for i, licencia in enumerate(licencias, 1):
@@ -68,6 +75,8 @@ async def me(update, context):
                     mensaje += f"   🎯 **Activada:** {uso_date.strftime('%d/%m/%Y %H:%M')}\n"
                 except (ValueError, TypeError):
                     pass
+    elif tiene_licencia:
+        mensaje += "\n🔑 **Tienes licencia pero no se encontraron detalles**\n"
     else:
         mensaje += "\n🔑 **No tienes licencias activas**\n"
         mensaje += "Usa `/key <clave>` para activar una licencia\n"
