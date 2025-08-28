@@ -1,26 +1,15 @@
-import json
-import os
-from datetime import datetime
-
-# Ruta al archivo de licencias
-LICENCIAS_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'licencias.json')
-
-def cargar_licencias():
-    """Carga las licencias desde el archivo JSON"""
-    try:
-        with open(LICENCIAS_FILE, 'r') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-def guardar_licencias(licencias):
-    """Guarda las licencias en el archivo JSON"""
-    with open(LICENCIAS_FILE, 'w') as f:
-        json.dump(licencias, f, indent=4)
+from funcionamiento.licencias import canjear_licencia
+from funcionamiento.usuarios import registrar_usuario, actualizar_estado_licencia
 
 async def key(update, context):
     """Comando para canjear una clave de licencia"""
-    user_id = str(update.effective_user.id)
+    user_id = update.effective_user.id
+    username = update.effective_user.username
+    first_name = update.effective_user.first_name
+    last_name = update.effective_user.last_name
+    
+    # Registrar al usuario si no existe
+    registrar_usuario(user_id, username, first_name, last_name)
     
     # Verificar los argumentos
     if len(context.args) < 1:
@@ -29,39 +18,21 @@ async def key(update, context):
     
     clave = context.args[0].upper()
     
-    # Cargar licencias
-    licencias = cargar_licencias()
+    # Canjear la licencia
+    success, message = canjear_licencia(clave, user_id)
     
-    # Verificar si la clave existe
-    if clave not in licencias:
-        await update.message.reply_text("❌ Clave inválida o no existe.")
-        return
-    
-    # Verificar si la clave ya fue usada
-    if licencias[clave]['usada']:
-        await update.message.reply_text("❌ Esta clave ya ha sido utilizada.")
-        return
-    
-    # Verificar si la clave ha expirado (si no es permanente)
-    if licencias[clave]['expiracion'] != 'permanente':
-        expiracion = datetime.fromisoformat(licencias[clave]['expiracion'])
-        if datetime.now() > expiracion:
-            await update.message.reply_text("❌ Esta clave ha expirado.")
-            return
-    
-    # Canjear la clave
-    licencias[clave]['usada'] = True
-    licencias[clave]['usuario'] = user_id
-    licencias[clave]['fecha_uso'] = datetime.now().isoformat()
-    
-    # Guardar los cambios
-    guardar_licencias(licencias)
-    
-    # Determinar el tipo de licencia
-    expiracion = licencias[clave]['expiracion']
-    if expiracion == 'permanente':
-        mensaje = "✅ ¡Licencia activada! Tienes acceso permanente."
+    if success:
+        # Obtener información de la licencia para mostrar detalles
+        from funcionamiento.licencias import cargar_licencias
+        licencias = cargar_licencias()
+        licencia_info = licencias.get(clave, {})
+        
+        if licencia_info.get('expiracion') == 'permanente':
+            mensaje_final = "✅ ¡Licencia activada! Tienes acceso permanente."
+        else:
+            expiracion = licencia_info.get('expiracion', '').split('T')[0]
+            mensaje_final = f"✅ ¡Licencia activada! Expira el {expiracion}"
     else:
-        mensaje = f"✅ ¡Licencia activada! Expira el {expiracion.split('T')[0]}"
+        mensaje_final = f"❌ {message}"
     
-    await update.message.reply_text(mensaje)
+    await update.message.reply_text(mensaje_final)
