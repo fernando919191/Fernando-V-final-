@@ -8,10 +8,6 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from funcionamiento.tokens import TOKENS
 
-# Importar las funciones de verificación de licencias y registro de usuarios
-from funcionamiento.licencias import usuario_tiene_licencia_activa
-from funcionamiento.usuarios import registrar_usuario
-
 # Configurar logging
 logging.basicConfig(
     level=logging.INFO,
@@ -21,6 +17,10 @@ logger = logging.getLogger(__name__)
 
 # ID de usuario administrador principal
 ADMIN_PRINCIPAL = "6751216122"
+
+# Importar funciones después de definir constantes para evitar circular imports
+from funcionamiento.licencias import usuario_tiene_licencia_activa
+from funcionamiento.usuarios import registrar_usuario
 
 def comando_con_licencia(func):
     """Decorador para verificar licencia antes de ejecutar un comando"""
@@ -152,7 +152,6 @@ async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_T
                 return
         
         # Si tiene licencia, procesar el mensaje normalmente
-        # (aquí puedes agregar cualquier lógica adicional para mensajes con licencia)
         
     except Exception as e:
         logger.error(f"❌ Error en manejar_mensajes_texto: {e}")
