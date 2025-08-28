@@ -9,7 +9,7 @@ async def me(update, context):
     first_name = update.effective_user.first_name
     last_name = update.effective_user.last_name
     
-    # Obtener información de la base de datos
+    # Obtener información de la base de datos (esto actualizará el estado de licencia)
     usuario_info = obtener_usuario(user_id)
     tiene_licencia = usuario_tiene_licencia_activa(user_id)
     licencias = obtener_licencias_usuario(user_id)
@@ -27,7 +27,7 @@ async def me(update, context):
     if username:
         mensaje += f"📛 **Usuario:** @{username}\n"
     
-    # Estado de licencia
+    # Estado de licencia (verificación en tiempo real)
     estado_licencia = "✅ **Licencia:** ACTIVA" if tiene_licencia else "❌ **Licencia:** INACTIVA"
     mensaje += f"{estado_licencia}\n"
     
