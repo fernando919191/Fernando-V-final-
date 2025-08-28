@@ -1,9 +1,3 @@
-import os
-import sys
-
-# Añadir el directorio padre al path para importaciones
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
 from funcionamiento.licencias import canjear_licencia
 from funcionamiento.usuarios import registrar_usuario, actualizar_estado_licencia
 
@@ -29,7 +23,7 @@ async def key(update, context):
     
     if success:
         # Actualizar el estado de licencia del usuario
-        actualizar_estado_licencia(user_id, True)
+        actualizar_estado_licencia(user_id)
         
         # Obtener información de la licencia para mostrar detalles
         from funcionamiento.licencias import cargar_licencias
