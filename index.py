@@ -8,8 +8,9 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from funcionamiento.tokens import TOKENS
 
-# Importar la función de verificación de licencias
+# Importar las funciones de verificación de licencias y registro de usuarios
 from funcionamiento.licencias import usuario_tiene_licencia_activa
+from funcionamiento.usuarios import registrar_usuario
 
 # Configurar logging
 logging.basicConfig(
@@ -25,10 +26,16 @@ def comando_con_licencia(func):
     """Decorador para verificar licencia antes de ejecutar un comando"""
     async def wrapper(update, context):
         user_id = str(update.effective_user.id)
+        username = update.effective_user.username
+        first_name = update.effective_user.first_name
+        last_name = update.effective_user.last_name
         command_name = func.__name__
         
+        # Registrar al usuario en la base de datos
+        registrar_usuario(user_id, username, first_name, last_name)
+        
         # Permitir siempre estos comandos sin verificación de licencia
-        comandos_permitidos_sin_licencia = ['key', 'start', 'addkeys']
+        comandos_permitidos_sin_licencia = ['key', 'start', 'addkeys', 'help', 'users']
         
         if command_name not in comandos_permitidos_sin_licencia and not usuario_tiene_licencia_activa(user_id):
             await update.message.reply_text(
@@ -40,6 +47,11 @@ def comando_con_licencia(func):
         
         # Verificación especial para addkeys - solo el admin principal puede usarlo
         if command_name == 'addkeys' and user_id != ADMIN_PRINCIPAL:
+            await update.message.reply_text("❌ No tienes permisos para usar este comando.")
+            return
+        
+        # Verificación especial para users - solo el admin principal puede usarlo
+        if command_name == 'users' and user_id != ADMIN_PRINCIPAL:
             await update.message.reply_text("❌ No tienes permisos para usar este comando.")
             return
         
@@ -113,14 +125,20 @@ async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_T
     """Maneja mensajes de texto normales con verificación de licencia"""
     try:
         user_id = str(update.effective_user.id)
+        username = update.effective_user.username
+        first_name = update.effective_user.first_name
+        last_name = update.effective_user.last_name
         message_text = update.message.text
+        
+        # Registrar al usuario en la base de datos
+        registrar_usuario(user_id, username, first_name, last_name)
         
         logger.info(f"📩 Mensaje recibido de {user_id}: {message_text}")
         
         # Verificar si el usuario tiene licencia activa
         if not usuario_tiene_licencia_activa(user_id):
             # Permitir solo los comandos esenciales sin licencia
-            comandos_permitidos = ['/key', '/start', '/addkeys']
+            comandos_permitidos = ['/key', '/start', '/addkeys', '/help', '/users']
             if any(message_text.startswith(cmd) for cmd in comandos_permitidos):
                 # Permitir que estos comandos se procesen normalmente
                 return
