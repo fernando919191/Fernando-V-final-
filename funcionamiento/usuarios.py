@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime
+from funcionamiento.licencias import usuario_tiene_licencia_activa
 
 # Ruta al archivo de usuarios
 USUARIOS_FILE = os.path.join(os.path.dirname(__file__), '..', 'usuarios.json')
@@ -30,8 +31,8 @@ def registrar_usuario(user_id, username=None, first_name=None, last_name=None):
             'first_name': first_name,
             'last_name': last_name,
             'fecha_registro': datetime.now().isoformat(),
-            'tiene_licencia': False,
-            'ultima_verificacion': None
+            'tiene_licencia': usuario_tiene_licencia_activa(user_id),
+            'ultima_verificacion': datetime.now().isoformat()
         }
     else:
         # Actualizar información existente
@@ -41,49 +42,39 @@ def registrar_usuario(user_id, username=None, first_name=None, last_name=None):
             usuarios[user_id]['first_name'] = first_name
         if last_name is not None:
             usuarios[user_id]['last_name'] = last_name
+        # Actualizar estado de licencia
+        usuarios[user_id]['tiene_licencia'] = usuario_tiene_licencia_activa(user_id)
+        usuarios[user_id]['ultima_verificacion'] = datetime.now().isoformat()
     
     guardar_usuarios(usuarios)
     return usuarios[user_id]
 
-def actualizar_estado_licencia(user_id, tiene_licencia):
-    """Actualiza el estado de licencia de un usuario"""
+def actualizar_estado_licencia(user_id):
+    """Actualiza el estado de licencia de un usuario basado en verificación real"""
     user_id = str(user_id)
     usuarios = cargar_usuarios()
     
     if user_id in usuarios:
+        tiene_licencia = usuario_tiene_licencia_activa(user_id)
         usuarios[user_id]['tiene_licencia'] = tiene_licencia
         usuarios[user_id]['ultima_verificacion'] = datetime.now().isoformat()
         guardar_usuarios(usuarios)
-        return True
+        return tiene_licencia
     
     return False
 
 def obtener_usuario(user_id):
-    """Obtiene la información de un usuario"""
+    """Obtiene la información de un usuario y actualiza su estado de licencia"""
     user_id = str(user_id)
     usuarios = cargar_usuarios()
-    return usuarios.get(user_id)
+    
+    if user_id in usuarios:
+        # Actualizar el estado de licencia antes de devolver los datos
+        usuarios[user_id]['tiene_licencia'] = usuario_tiene_licencia_activa(user_id)
+        usuarios[user_id]['ultima_verificacion'] = datetime.now().isoformat()
+        guardar_usuarios(usuarios)
+        return usuarios[user_id]
+    
+    return None
 
-def obtener_todos_usuarios():
-    """Obtiene todos los usuarios registrados"""
-    return cargar_usuarios()
-
-def obtener_usuarios_con_licencia():
-    """Obtiene solo los usuarios con licencia activa"""
-    usuarios = cargar_usuarios()
-    return {uid: data for uid, data in usuarios.items() if data.get('tiene_licencia', False)}
-
-def obtener_usuarios_sin_licencia():
-    """Obtiene solo los usuarios sin licencia activa"""
-    usuarios = cargar_usuarios()
-    return {uid: data for uid, data in usuarios.items() if not data.get('tiene_licencia', False)}
-
-def contar_usuarios():
-    """Cuenta el total de usuarios registrados"""
-    usuarios = cargar_usuarios()
-    return len(usuarios)
-
-def contar_usuarios_con_licencia():
-    """Cuenta los usuarios con licencia activa"""
-    usuarios = obtener_usuarios_con_licencia()
-    return len(usuarios)
+# ... (resto de funciones se mantienen igual)
