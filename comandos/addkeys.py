@@ -42,7 +42,7 @@ async def addkeys(update, context):
         await update.message.reply_text("❌ Tiempo no válido. Usa: 1h, 1d, 1m, 1y o permanente")
         return
     
-    # Calcular la fecha de expiración
+    # Calcular la fecha de expiración CORREGIDO
     if tiempo == 'permanente':
         expiracion = 'permanente'
     else:
@@ -52,9 +52,11 @@ async def addkeys(update, context):
         elif tiempo == '1d':
             expiracion = ahora + timedelta(days=1)
         elif tiempo == '1m':
-            expiracion = ahora + timedelta(days=30)
+            expiracion = ahora + timedelta(days=30)  # 30 días para 1 mes
         elif tiempo == '1y':
-            expiracion = ahora + timedelta(days=365)
+            expiracion = ahora + timedelta(days=365)  # 365 días para 1 año
+        
+        # Formatear correctamente la fecha ISO
         expiracion = expiracion.isoformat()
     
     # Generar las claves
