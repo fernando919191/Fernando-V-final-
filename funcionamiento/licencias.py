@@ -1,7 +1,6 @@
 import json
 import os
 from datetime import datetime
-from .usuarios import actualizar_estado_licencia
 
 # Ruta al archivo de licencias
 LICENCIAS_FILE = os.path.join(os.path.dirname(__file__), '..', 'licencias.json')
@@ -26,16 +25,18 @@ def usuario_tiene_licencia_activa(user_id):
     
     # Buscar en todas las licencias si alguna está activa para este usuario
     for clave, datos in licencias.items():
-        if datos['usuario'] == user_id and datos['usada']:
+        if datos.get('usuario') == user_id and datos.get('usada', False):
             # Verificar si la licencia es permanente
-            if datos['expiracion'] == 'permanente':
+            if datos.get('expiracion') == 'permanente':
                 return True
             
             # Verificar si la licencia no ha expirado
             try:
-                expiracion = datetime.fromisoformat(datos['expiracion'])
-                if datetime.now() < expiracion:
-                    return True
+                expiracion_str = datos.get('expiracion')
+                if expiracion_str and expiracion_str != 'permanente':
+                    expiracion = datetime.fromisoformat(expiracion_str)
+                    if datetime.now() < expiracion:
+                        return True
             except (ValueError, TypeError):
                 continue
     
@@ -48,30 +49,35 @@ def obtener_licencias_usuario(user_id):
     licencias_usuario = []
     
     for clave, datos in licencias.items():
-        if datos['usuario'] == user_id:
+        if datos.get('usuario') == user_id:
             licencias_usuario.append({
                 'clave': clave,
-                'expiracion': datos['expiracion'],
-                'fecha_uso': datos['fecha_uso']
+                'expiracion': datos.get('expiracion'),
+                'fecha_uso': datos.get('fecha_uso')
             })
     
     return licencias_usuario
 
 def canjear_licencia(clave, user_id):
-    """Canjea una licencia y actualiza el estado del usuario"""
+    """Canjea una licencia y devuelve (éxito, mensaje)"""
     user_id = str(user_id)
     licencias = cargar_licencias()
     
     if clave not in licencias:
         return False, "Clave inválida o no existe."
     
-    if licencias[clave]['usada']:
+    if licencias[clave].get('usada', False):
         return False, "Esta clave ya ha sido utilizada."
     
-    if licencias[clave]['expiracion'] != 'permanente':
-        expiracion = datetime.fromisoformat(licencias[clave]['expiracion'])
-        if datetime.now() > expiracion:
-            return False, "Esta clave ha expirado."
+    expiracion = licencias[clave].get('expiracion')
+    if expiracion != 'permanente':
+        try:
+            if expiracion:
+                expiracion_dt = datetime.fromisoformat(expiracion)
+                if datetime.now() > expiracion_dt:
+                    return False, "Esta clave ha expirado."
+        except (ValueError, TypeError):
+            return False, "Error en el formato de expiración."
     
     # Canjear la clave
     licencias[clave]['usada'] = True
@@ -79,8 +85,5 @@ def canjear_licencia(clave, user_id):
     licencias[clave]['fecha_uso'] = datetime.now().isoformat()
     
     guardar_licencias(licencias)
-    
-    # Actualizar el estado de licencia del usuario
-    actualizar_estado_licencia(user_id)
     
     return True, "Licencia activada correctamente."
