@@ -3,9 +3,9 @@ from telethon import TelegramClient
 import os
 
 # Configuración desde variables de entorno
-API_ID = os.environ.get('TELEGRAM_API_ID')
-API_HASH = os.environ.get('TELEGRAM_API_HASH') 
-PHONE_NUMBER = os.environ.get('TELEGRAM_PHONE_NUMBER')
+API_ID = os.environ.get('28812767')
+API_HASH = os.environ.get('29bca7d6dbc1f6b9d14a9182fb2bcf42') 
+PHONE_NUMBER = os.environ.get('+523741487538')
 
 client = None
 
