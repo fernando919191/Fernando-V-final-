@@ -1,46 +1,5 @@
-import os
+from .database import get_connection
 from datetime import datetime
-
-# Ruta al archivo de licencias
-LICENCIAS_FILE = os.path.join(os.path.dirname(__file__), '..', 'licencias.txt')
-
-def cargar_licencias():
-    """Carga las licencias desde el archivo TXT"""
-    licencias = {}
-    try:
-        with open(LICENCIAS_FILE, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line and ':' in line:
-                    clave, datos_str = line.split(':', 1)
-                    # Formato: clave:expiracion|usada|usuario|fecha_uso
-                    datos_partes = datos_str.split('|')
-                    if len(datos_partes) >= 4:
-                        licencias[clave] = {
-                            'expiracion': datos_partes[0],
-                            'usada': datos_partes[1].lower() == 'true',
-                            'usuario': datos_partes[2] if datos_partes[2] != 'None' else None,
-                            'fecha_uso': datos_partes[3] if datos_partes[3] != 'None' else None
-                        }
-    except FileNotFoundError:
-        # Si el archivo no existe, se creará automáticamente al guardar
-        pass
-    except Exception as e:
-        print(f"Error cargando licencias: {e}")
-    return licencias
-
-def guardar_licencias(licencias):
-    """Guarda las licencias en el archivo TXT"""
-    try:
-        with open(LICENCIAS_FILE, 'w', encoding='utf-8') as f:
-            for clave, datos in licencias.items():
-                # Formato: clave:expiracion|usada|usuario|fecha_uso
-                linea = f"{clave}:{datos['expiracion']}|{datos['usada']}|{datos['usuario']}|{datos['fecha_uso']}\n"
-                f.write(linea)
-        return True
-    except Exception as e:
-        print(f"Error guardando licencias: {e}")
-        return False
 
 def calcular_tiempo_restante(expiracion_str):
     """Calcula el tiempo restante de forma legible"""
@@ -85,73 +44,107 @@ def calcular_tiempo_restante(expiracion_str):
 def usuario_tiene_licencia_activa(user_id):
     """Verifica si un usuario tiene una licencia activa"""
     user_id = str(user_id)
-    licencias = cargar_licencias()
+    conn = get_connection()
+    cursor = conn.cursor()
     
-    # Buscar en todas las licencias si alguna está activa para este usuario
-    for clave, datos in licencias.items():
-        if datos.get('usuario') == user_id and datos.get('usada', False):
-            # Verificar si la licencia es permanente
-            if datos.get('expiracion') == 'permanente':
-                return True
-            
-            # Verificar si la licencia no ha expirado
-            try:
-                expiracion_str = datos.get('expiracion')
-                if expiracion_str and expiracion_str != 'permanente':
-                    expiracion = datetime.fromisoformat(expiracion_str)
-                    if datetime.now() < expiracion:
-                        return True
-            except (ValueError, TypeError):
-                continue
+    cursor.execute('''
+    SELECT * FROM licencias 
+    WHERE usuario = ? AND usada = TRUE 
+    AND (expiracion = 'permanente' OR expiracion > ?)
+    ''', (user_id, datetime.now().isoformat()))
     
-    return False
+    licencia = cursor.fetchone()
+    conn.close()
+    
+    return licencia is not None
 
 def obtener_licencias_usuario(user_id):
     """Obtiene todas las licencias de un usuario"""
     user_id = str(user_id)
-    licencias = cargar_licencias()
-    licencias_usuario = []
+    conn = get_connection()
+    cursor = conn.cursor()
     
-    for clave, datos in licencias.items():
-        if datos.get('usuario') == user_id:
-            tiempo_restante = calcular_tiempo_restante(datos.get('expiracion'))
-            licencias_usuario.append({
-                'clave': clave,
-                'expiracion': datos.get('expiracion'),
-                'fecha_uso': datos.get('fecha_uso'),
-                'tiempo_restante': tiempo_restante
-            })
+    cursor.execute('''
+    SELECT clave, expiracion, fecha_uso FROM licencias 
+    WHERE usuario = ?
+    ''', (user_id,))
     
-    return licencias_usuario
+    licencias = []
+    for row in cursor.fetchall():
+        tiempo_restante = calcular_tiempo_restante(row['expiracion'])
+        licencias.append({
+            'clave': row['clave'],
+            'expiracion': row['expiracion'],
+            'fecha_uso': row['fecha_uso'],
+            'tiempo_restante': tiempo_restante
+        })
+    
+    conn.close()
+    return licencias
 
 def canjear_licencia(clave, user_id):
     """Canjea una licencia y devuelve (éxito, mensaje)"""
     user_id = str(user_id)
-    licencias = cargar_licencias()
+    conn = get_connection()
+    cursor = conn.cursor()
     
-    if clave not in licencias:
+    # Verificar si la licencia existe
+    cursor.execute('SELECT * FROM licencias WHERE clave = ?', (clave,))
+    licencia = cursor.fetchone()
+    
+    if not licencia:
+        conn.close()
         return False, "Clave inválida o no existe."
     
-    if licencias[clave].get('usada', False):
+    if licencia['usada']:
+        conn.close()
         return False, "Esta clave ya ha sido utilizada."
     
-    expiracion = licencias[clave].get('expiracion')
-    if expiracion != 'permanente':
+    # Verificar expiración (si no es permanente)
+    if licencia['expiracion'] != 'permanente':
         try:
-            if expiracion:
-                expiracion_dt = datetime.fromisoformat(expiracion)
-                if datetime.now() > expiracion_dt:
-                    return False, "Esta clave ha expirado."
+            expiracion_dt = datetime.fromisoformat(licencia['expiracion'])
+            if datetime.now() > expiracion_dt:
+                conn.close()
+                return False, "Esta clave ha expirado."
         except (ValueError, TypeError):
+            conn.close()
             return False, "Error en el formato de expiración."
     
-    # Canjear la clave
-    licencias[clave]['usada'] = True
-    licencias[clave]['usuario'] = user_id
-    licencias[clave]['fecha_uso'] = datetime.now().isoformat()
+    # Canjear la licencia
+    cursor.execute('''
+    UPDATE licencias 
+    SET usada = TRUE, usuario = ?, fecha_uso = ?
+    WHERE clave = ?
+    ''', (user_id, datetime.now().isoformat(), clave))
     
-    # Guardar los cambios
-    if guardar_licencias(licencias):
-        return True, "Licencia activada correctamente."
-    else:
-        return False, "Error al guardar la licencia."
+    conn.commit()
+    conn.close()
+    
+    return True, "Licencia activada correctamente."
+
+def crear_licencias(licencias_data):
+    """Crea múltiples licencias en la base de datos"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        for licencia in licencias_data:
+            cursor.execute('''
+            INSERT OR REPLACE INTO licencias (clave, expiracion, usada, usuario, fecha_uso)
+            VALUES (?, ?, ?, ?, ?)
+            ''', (
+                licencia['clave'],
+                licencia['expiracion'],
+                licencia['usada'],
+                licencia['usuario'],
+                licencia['fecha_uso']
+            ))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error creando licencias: {e}")
+        return False
+    finally:
+        conn.close()
