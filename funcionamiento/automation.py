@@ -1,11 +1,11 @@
 import asyncio
-from telethon import TelegramClient, events
+from telethon import TelegramClient
 import os
 
-# Configuración de API de Telegram (obtener de https://my.telegram.org)
-API_ID = os.environ.get('28812767', '')
-API_HASH = os.environ.get('29bca7d6dbc1f6b9d14a9182fb2bcf42', '')
-PHONE_NUMBER = os.environ.get('+523741487538', '')
+# ✅ Configuración SEGURA - Variables de entorno
+API_ID = os.environ.get('TELEGRAM_API_ID')  # SIN valores por defecto
+API_HASH = os.environ.get('TELEGRAM_API_HASH')
+PHONE_NUMBER = os.environ.get('TELEGRAM_PHONE_NUMBER')
 
 # Variable global para el cliente
 client = None
@@ -13,8 +13,11 @@ client = None
 def iniciar_automation():
     """Inicia el cliente de Telethon para automatización"""
     global client
-    if not all([API_ID, API_HASH, PHONE_NUMBER]):
+    
+    # ✅ Verificar que todas las variables estén configuradas
+    if not API_ID or not API_HASH or not PHONE_NUMBER:
         print("❌ Faltan credenciales de Telegram API")
+        print("   Configura: TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE_NUMBER")
         return None
     
     try:
