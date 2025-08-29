@@ -3,17 +3,14 @@ from funcionamiento.licencias import obtener_licencias_usuario, usuario_tiene_li
 from datetime import datetime
 
 async def me(update, context):
-    """Muestra la información del usuario actual - CORREGIDO"""
+    """Muestra la información del usuario actual - Funciona SIN licencia"""
     user_id = update.effective_user.id
     username = update.effective_user.username
     first_name = update.effective_user.first_name
     last_name = update.effective_user.last_name
     
-    # Registrar al usuario si no existe
-    registrar_usuario(user_id, username, first_name, last_name)
-    
-    # Obtener información de la base de datos
-    usuario_info = obtener_usuario(user_id)
+    # Registrar al usuario si no existe (esto siempre funciona)
+    usuario_info = registrar_usuario(user_id, username, first_name, last_name)
     tiene_licencia = usuario_tiene_licencia_activa(user_id)
     
     # Solo intentar obtener licencias si el usuario tiene licencia activa
@@ -53,31 +50,11 @@ async def me(update, context):
     if licencias:
         mensaje += "\n🔑 **Tus licencias:**\n"
         for i, licencia in enumerate(licencias, 1):
-            expiracion = licencia.get('expiracion', '')
             fecha_uso = licencia.get('fecha_uso', '')
+            tiempo_restante = licencia.get('tiempo_restante', 'DESCONOCIDO')
             
             mensaje += f"\n{i}. **Key:** `{licencia.get('clave', 'N/A')}`\n"
-            
-            if expiracion == 'permanente':
-                mensaje += "   ⏰ **Duración:** PERMANENTE\n"
-            elif expiracion:
-                try:
-                    # Asegurar formato correcto de fecha
-                    if 'T' not in expiracion:
-                        expiracion += 'T00:00:00'
-                    exp_date = datetime.fromisoformat(expiracion.replace('Z', '+00:00'))
-                    ahora = datetime.now()
-                    if ahora > exp_date:
-                        mensaje += "   ⏰ **Estado:** EXPIRADA\n"
-                    else:
-                        dias_restantes = (exp_date - ahora).days
-                        horas_restantes = (exp_date - ahora).seconds // 3600
-                        if dias_restantes > 0:
-                            mensaje += f"   ⏰ **Expira:** {exp_date.strftime('%d/%m/%Y')} ({dias_restantes} días restantes)\n"
-                        else:
-                            mensaje += f"   ⏰ **Expira:** {exp_date.strftime('%d/%m/%Y %H:%M')} ({horas_restantes} horas restantes)\n"
-                except (ValueError, TypeError) as e:
-                    mensaje += f"   ⏰ **Expiración:** Error en formato ({e})\n"
+            mensaje += f"   ⏰ **Tiempo restante:** {tiempo_restante}\n"
             
             if fecha_uso:
                 try:
@@ -87,7 +64,7 @@ async def me(update, context):
                     uso_date = datetime.fromisoformat(fecha_uso.replace('Z', '+00:00'))
                     mensaje += f"   🎯 **Activada:** {uso_date.strftime('%d/%m/%Y %H:%M')}\n"
                 except (ValueError, TypeError) as e:
-                    mensaje += f"   🎯 **Activada:** Error en formato ({e})\n"
+                    mensaje += f"   🎯 **Activada:** Error en formato\n"
     elif tiene_licencia:
         mensaje += "\n🔑 **Tienes licencia pero no se encontraron detalles**\n"
     else:
