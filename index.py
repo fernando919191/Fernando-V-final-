@@ -99,13 +99,19 @@ def cargar_comandos_conversacion(application):
             nombre_comando = archivo[:-3]
             try:
                 modulo = importlib.import_module(f'comandos.{nombre_comando}')
+                # ✅ SOPORTE PARA CONVERSATIONHANDLER Y COMANDOS NORMALES
                 if hasattr(modulo, 'setup'):
-                    # Comando con ConversationHandler
+                    # Comando con ConversationHandler (como ppcharge)
                     handler = modulo.setup(application)
                     application.add_handler(handler)
                     logger.info(f"✅ Comando conversación cargado: /{nombre_comando}")
+                elif hasattr(modulo, nombre_comando):
+                    # Comando normal (como addkeys, key, etc.)
+                    funcion = getattr(modulo, nombre_comando)
+                    application.add_handler(CommandHandler(nombre_comando, funcion))
+                    logger.info(f"✅ Comando normal cargado: /{nombre_comando}")
             except Exception as e:
-                logger.error(f"❌ Error cargando comando conversación {nombre_comando}: {e}")
+                logger.error(f"❌ Error cargando comando {nombre_comando}: {e}")
 
 def eliminar_webhook_sincrono(token):
     """Elimina webhook de forma síncrona (sin asyncio)"""
@@ -138,7 +144,7 @@ async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_T
         # Verificar si el usuario tiene licencia activa
         if not usuario_tiene_licencia_activa(user_id):
             # Permitir solo los comandos esenciales sin licencia
-            comandos_permitidos = ['/key', '/start', '/addkeys', '/help', '/users', '/me', '/ppcharge', '/pprefund', '/ppconfig']
+            comandos_permitidos = ['/key', '/start', '/addkeys', '/help', '/users', '/me', '/ppconfig']
             if any(message_text.startswith(cmd) for cmd in comandos_permitidos):
                 # Permitir que estos comandos se procesen normalmente
                 return
@@ -152,7 +158,6 @@ async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_T
                 return
         
         # Si tiene licencia, procesar el mensaje normalmente
-        # (aquí puedes agregar cualquier lógica adicional para mensajes con licencia)
         
     except Exception as e:
         logger.error(f"❌ Error en manejar_mensajes_texto: {e}")
@@ -187,7 +192,7 @@ def main():
             application.add_handler(CommandHandler(nombre, funcion))
             logger.info(f"📝 Registrado comando: /{nombre}")
 
-        # Registrar comandos de conversación (como /gen)
+        # Registrar comandos de conversación (como /ppcharge y /gen)
         cargar_comandos_conversacion(application)
 
         # Manejo de mensajes de texto normales (con verificación de licencia)
@@ -200,9 +205,11 @@ def main():
         
         # Obtener lista de comandos registrados
         todos_comandos = list(comandos.keys())
-        # Agregar comandos de conversación (asumiendo que gen está presente)
+        # Agregar comandos de conversación
         if os.path.exists(os.path.join('comandos', 'gen.py')):
             todos_comandos.append('gen')
+        if os.path.exists(os.path.join('comandos', 'ppcharge.py')):
+            todos_comandos.append('ppcharge')
         
         logger.info(f"📋 Comandos disponibles: {', '.join(['/' + cmd for cmd in todos_comandos])}")
         
