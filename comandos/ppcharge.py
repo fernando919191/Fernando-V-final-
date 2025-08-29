@@ -4,15 +4,28 @@ import paypalrestsdk
 from telegram import Update
 from telegram.ext import ContextTypes
 
-# Configurar PayPal
-paypalrestsdk.configure({
-    "mode": "sandbox",  # "sandbox" o "live"
-    "client_id": os.environ.get('PAYPAL_CLIENT_ID', ''),
-    "client_secret": os.environ.get('PAYPAL_CLIENT_SECRET', '')
-})
-
 async def ppcharge(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Microcharge de $20 MXN con PayPal - Versión simplificada"""
+    """Microcharge de $20 MXN con PayPal"""
+    
+    # Verificar si PayPal está configurado
+    client_id = os.environ.get('PAYPAL_CLIENT_ID')
+    client_secret = os.environ.get('PAYPAL_CLIENT_SECRET')
+    
+    if not client_id or not client_secret:
+        await update.message.reply_text(
+            "❌ PayPal no está configurado.\n\n"
+            "Usa primero: /ppconfig <client_id> <client_secret>\n"
+            "O configura las variables de entorno PAYPAL_CLIENT_ID y PAYPAL_CLIENT_SECRET"
+        )
+        return
+    
+    # Configurar PayPal con las credenciales
+    paypalrestsdk.configure({
+        "mode": "sandbox",  # "sandbox" o "live"
+        "client_id": client_id,
+        "client_secret": client_secret
+    })
+    
     user_id = update.effective_user.id
     
     # Verificar licencia
@@ -82,6 +95,16 @@ async def ppcharge(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def realizar_microcharge_paypal(cc, mm, yy, cvv, amount=20.00):
     """Realiza un microcharge de $20 MXN con PayPal"""
     try:
+        # Configurar PayPal con las credenciales actuales
+        client_id = os.environ.get('PAYPAL_CLIENT_ID')
+        client_secret = os.environ.get('PAYPAL_CLIENT_SECRET')
+        
+        paypalrestsdk.configure({
+            "mode": "sandbox",
+            "client_id": client_id,
+            "client_secret": client_secret
+        })
+        
         # Detectar tipo de tarjeta
         card_type = "visa"  # Por defecto
         if cc.startswith('5'):
