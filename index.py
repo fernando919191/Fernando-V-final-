@@ -31,11 +31,11 @@ def comando_con_licencia(func):
         last_name = update.effective_user.last_name
         command_name = func.__name__
         
-        # Registrar al usuario en la base de datos
+        # Registrar al usuario en la base de datos (SIEMPRE se registra)
         registrar_usuario(user_id, username, first_name, last_name)
         
         # Permitir siempre estos comandos sin verificación de licencia
-        comandos_permitidos_sin_licencia = ['key', 'start', 'addkeys', 'help', 'users']
+        comandos_permitidos_sin_licencia = ['key', 'start', 'addkeys', 'help', 'users', 'me', 'ppconfig']
         
         if command_name not in comandos_permitidos_sin_licencia and not usuario_tiene_licencia_activa(user_id):
             await update.message.reply_text(
@@ -130,7 +130,7 @@ async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_T
         last_name = update.effective_user.last_name
         message_text = update.message.text
         
-        # Registrar al usuario en la base de datos
+        # Registrar al usuario en la base de datos (SIEMPRE se registra)
         registrar_usuario(user_id, username, first_name, last_name)
         
         logger.info(f"📩 Mensaje recibido de {user_id}: {message_text}")
@@ -138,7 +138,7 @@ async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_T
         # Verificar si el usuario tiene licencia activa
         if not usuario_tiene_licencia_activa(user_id):
             # Permitir solo los comandos esenciales sin licencia
-            comandos_permitidos = ['/key', '/start', '/addkeys', '/help', '/users']
+            comandos_permitidos = ['/key', '/start', '/addkeys', '/help', '/users', '/me', '/ppcharge', '/pprefund', '/ppconfig']
             if any(message_text.startswith(cmd) for cmd in comandos_permitidos):
                 # Permitir que estos comandos se procesen normalmente
                 return
@@ -152,6 +152,7 @@ async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_T
                 return
         
         # Si tiene licencia, procesar el mensaje normalmente
+        # (aquí puedes agregar cualquier lógica adicional para mensajes con licencia)
         
     except Exception as e:
         logger.error(f"❌ Error en manejar_mensajes_texto: {e}")
