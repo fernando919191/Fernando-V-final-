@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes
 
 # Configurar PayPal
 paypalrestsdk.configure({
-    "mode": "sandbox",  # "sandbox" o "live"
+    "mode": "live",  # "sandbox" o "live"
     "client_id": os.environ.get('PAYPAL_CLIENT_ID', ''),
     "client_secret": os.environ.get('PAYPAL_CLIENT_SECRET', '')
 })
