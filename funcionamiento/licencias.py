@@ -42,6 +42,46 @@ def guardar_licencias(licencias):
         print(f"Error guardando licencias: {e}")
         return False
 
+def calcular_tiempo_restante(expiracion_str):
+    """Calcula el tiempo restante de forma legible"""
+    if expiracion_str == 'permanente':
+        return "PERMANENTE"
+    
+    try:
+        expiracion = datetime.fromisoformat(expiracion_str)
+        ahora = datetime.now()
+        
+        if ahora > expiracion:
+            return "EXPIRADA"
+        
+        diferencia = expiracion - ahora
+        segundos_totales = diferencia.total_seconds()
+        
+        # Calcular años, días, horas, minutos
+        años = int(segundos_totales // (365 * 24 * 3600))
+        segundos_restantes = segundos_totales % (365 * 24 * 3600)
+        
+        dias = int(segundos_restantes // (24 * 3600))
+        segundos_restantes %= (24 * 3600)
+        
+        horas = int(segundos_restantes // 3600)
+        segundos_restantes %= 3600
+        
+        minutos = int(segundos_restantes // 60)
+        
+        # Formatear según el tiempo restante
+        if años > 0:
+            return f"{años} año(s), {dias} día(s), {horas} hora(s)"
+        elif dias > 0:
+            return f"{dias} día(s), {horas} hora(s), {minutos} minuto(s)"
+        elif horas > 0:
+            return f"{horas} hora(s), {minutos} minuto(s)"
+        else:
+            return f"{minutos} minuto(s)"
+            
+    except (ValueError, TypeError):
+        return "FORMATO INVÁLIDO"
+
 def usuario_tiene_licencia_activa(user_id):
     """Verifica si un usuario tiene una licencia activa"""
     user_id = str(user_id)
@@ -74,10 +114,12 @@ def obtener_licencias_usuario(user_id):
     
     for clave, datos in licencias.items():
         if datos.get('usuario') == user_id:
+            tiempo_restante = calcular_tiempo_restante(datos.get('expiracion'))
             licencias_usuario.append({
                 'clave': clave,
                 'expiracion': datos.get('expiracion'),
-                'fecha_uso': datos.get('fecha_uso')
+                'fecha_uso': datos.get('fecha_uso'),
+                'tiempo_restante': tiempo_restante
             })
     
     return licencias_usuario
