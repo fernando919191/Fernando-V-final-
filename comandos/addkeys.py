@@ -1,19 +1,14 @@
 import secrets
 from datetime import datetime, timedelta
-from funcionamiento.licencias import cargar_licencias, guardar_licencias
+from funcionamiento.licencias import crear_licencias
+from funcionamiento.usuarios import es_administrador
 
 async def addkeys(update, context):
     """Comando para agregar claves de licencia"""
     user_id = str(update.effective_user.id)
     
     # Verificar si el usuario es admin
-    try:
-        with open('admins.txt', 'r') as f:
-            admins = [line.strip() for line in f.readlines()]
-            if user_id not in admins:
-                await update.message.reply_text("❌ No tienes permisos para usar este comando.")
-                return
-    except FileNotFoundError:
+    if not es_administrador(user_id):
         await update.message.reply_text("❌ No tienes permisos para usar este comando.")
         return
     
@@ -50,23 +45,24 @@ async def addkeys(update, context):
             expiracion = (ahora + timedelta(days=365)).isoformat()
     
     # Generar las claves
-    licencias = cargar_licencias()
+    licencias_data = []
     claves_generadas = []
     
     for _ in range(cantidad):
         clave = secrets.token_hex(8).upper()
-        licencias[clave] = {
+        licencias_data.append({
+            'clave': clave,
             'expiracion': expiracion,
             'usada': False,
             'usuario': None,
             'fecha_uso': None
-        }
+        })
         claves_generadas.append(clave)
     
-    # Guardar las licencias
-    if guardar_licencias(licencias):
+    # Guardar en la base de datos
+    if crear_licencias(licencias_data):
         mensaje = f"✅ Se han generado {cantidad} claves con expiración: {tiempo}\n\n"
         mensaje += "\n".join(claves_generadas)
         await update.message.reply_text(mensaje)
     else:
-        await update.message.reply_text("❌ Error al guardar las claves.")
+        await update.message.reply_text("❌ Error al guardar las claves en la base de datos.")
