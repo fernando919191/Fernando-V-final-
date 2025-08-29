@@ -2,25 +2,20 @@ import asyncio
 from telethon import TelegramClient
 import os
 
-# ✅ Configuración SEGURA - Variables de entorno
-API_ID = os.environ.get('TELEGRAM_API_ID')  # SIN valores por defecto
-API_HASH = os.environ.get('TELEGRAM_API_HASH')
+# Configuración desde variables de entorno
+API_ID = os.environ.get('TELEGRAM_API_ID')
+API_HASH = os.environ.get('TELEGRAM_API_HASH') 
 PHONE_NUMBER = os.environ.get('TELEGRAM_PHONE_NUMBER')
 
-# Variable global para el cliente
 client = None
 
 def iniciar_automation():
-    """Inicia el cliente de Telethon para automatización"""
+    """Inicia el cliente de Telethon"""
     global client
-    
-    # ✅ Verificar que todas las variables estén configuradas
-    if not API_ID or not API_HASH or not PHONE_NUMBER:
-        print("❌ Faltan credenciales de Telegram API")
-        print("   Configura: TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE_NUMBER")
-        return None
-    
     try:
+        if not all([API_ID, API_HASH, PHONE_NUMBER]):
+            return None
+            
         client = TelegramClient('bot_session', int(API_ID), API_HASH)
         return client
     except Exception as e:
@@ -28,26 +23,25 @@ def iniciar_automation():
         return None
 
 async def enviar_a_bot_secundario(bot_username, cc_data):
-    """Envía comando al bot secundario y espera respuesta"""
+    """Envía comando al bot secundario"""
     try:
-        # Enviar comando al bot secundario
+        if not client:
+            return "❌ Cliente no inicializado"
+            
         await client.send_message(bot_username, f"/bn {cc_data}")
-        
-        # Esperar respuesta (timeout de 30 segundos)
-        response = await esperar_respuesta_bot(bot_username, timeout=30)
+        response = await esperar_respuesta_bot(bot_username)
         return response
         
     except Exception as e:
         return f"❌ Error: {str(e)}"
 
 async def esperar_respuesta_bot(bot_username, timeout=30):
-    """Espera la respuesta del bot secundario"""
+    """Espera la respuesta del bot"""
     try:
-        # Esperar mensaje del bot
         async with client.conversation(bot_username, timeout=timeout) as conv:
             response = await conv.get_response()
             return response.text
     except asyncio.TimeoutError:
         return "❌ Timeout: El bot no respondió"
     except Exception as e:
-        return f"❌ Error esperando respuesta: {str(e)}"
+        return f"❌ Error: {str(e)}"
