@@ -1,25 +1,49 @@
-import json
 import os
 from datetime import datetime
 
 # Ruta al archivo de licencias
-LICENCIAS_FILE = os.path.join(os.path.dirname(__file__), '..', 'licencias.json')
+LICENCIAS_FILE = os.path.join(os.path.dirname(__file__), '..', 'licencias.txt')
 
 def cargar_licencias():
-    """Carga las licencias desde el archivo JSON"""
+    """Carga las licencias desde el archivo TXT"""
+    licencias = {}
     try:
-        with open(LICENCIAS_FILE, 'r') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+        with open(LICENCIAS_FILE, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and ':' in line:
+                    clave, datos_str = line.split(':', 1)
+                    # Formato: clave:expiracion|usada|usuario|fecha_uso
+                    datos_partes = datos_str.split('|')
+                    if len(datos_partes) >= 4:
+                        licencias[clave] = {
+                            'expiracion': datos_partes[0],
+                            'usada': datos_partes[1].lower() == 'true',
+                            'usuario': datos_partes[2] if datos_partes[2] != 'None' else None,
+                            'fecha_uso': datos_partes[3] if datos_partes[3] != 'None' else None
+                        }
+    except FileNotFoundError:
+        # Si el archivo no existe, se creará automáticamente al guardar
+        pass
+    except Exception as e:
+        print(f"Error cargando licencias: {e}")
+    return licencias
 
 def guardar_licencias(licencias):
-    """Guarda las licencias en el archivo JSON"""
-    with open(LICENCIAS_FILE, 'w') as f:
-        json.dump(licencias, f, indent=4)
+    """Guarda las licencias en el archivo TXT"""
+    try:
+        with open(LICENCIAS_FILE, 'w', encoding='utf-8') as f:
+            for clave, datos in licencias.items():
+                # Formato: clave:expiracion|usada|usuario|fecha_uso
+                linea = f"{clave}:{datos['expiracion']}|{datos['usada']}|{datos['usuario']}|{datos['fecha_uso']}\n"
+                f.write(linea)
+        return True
+    except Exception as e:
+        print(f"Error guardando licencias: {e}")
+        return False
 
 def usuario_tiene_licencia_activa(user_id):
-    """Verifica si un usuario tiene una licencia activa - CORREGIDO"""
+    """Verifica si un usuario tiene una licencia activa"""
     user_id = str(user_id)
     licencias = cargar_licencias()
     
@@ -34,14 +58,10 @@ def usuario_tiene_licencia_activa(user_id):
             try:
                 expiracion_str = datos.get('expiracion')
                 if expiracion_str and expiracion_str != 'permanente':
-                    # Asegurar el formato correcto de la fecha
-                    if 'T' not in expiracion_str:
-                        expiracion_str += 'T00:00:00'
                     expiracion = datetime.fromisoformat(expiracion_str)
                     if datetime.now() < expiracion:
                         return True
-            except (ValueError, TypeError) as e:
-                print(f"Error al parsear fecha: {e}")
+            except (ValueError, TypeError):
                 continue
     
     return False
@@ -63,7 +83,7 @@ def obtener_licencias_usuario(user_id):
     return licencias_usuario
 
 def canjear_licencia(clave, user_id):
-    """Canjea una licencia y devuelve (éxito, mensaje) - CORREGIDO"""
+    """Canjea una licencia y devuelve (éxito, mensaje)"""
     user_id = str(user_id)
     licencias = cargar_licencias()
     
@@ -77,20 +97,19 @@ def canjear_licencia(clave, user_id):
     if expiracion != 'permanente':
         try:
             if expiracion:
-                # Asegurar el formato correcto de la fecha
-                if 'T' not in expiracion:
-                    expiracion += 'T00:00:00'
                 expiracion_dt = datetime.fromisoformat(expiracion)
                 if datetime.now() > expiracion_dt:
                     return False, "Esta clave ha expirado."
-        except (ValueError, TypeError) as e:
-            return False, f"Error en el formato de expiración: {e}"
+        except (ValueError, TypeError):
+            return False, "Error en el formato de expiración."
     
     # Canjear la clave
     licencias[clave]['usada'] = True
     licencias[clave]['usuario'] = user_id
     licencias[clave]['fecha_uso'] = datetime.now().isoformat()
     
-    guardar_licencias(licencias)
-    
-    return True, "Licencia activada correctamente."
+    # Guardar los cambios
+    if guardar_licencias(licencias):
+        return True, "Licencia activada correctamente."
+    else:
+        return False, "Error al guardar la licencia."
