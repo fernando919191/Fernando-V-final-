@@ -1,13 +1,10 @@
 import asyncio
 from telegram import Update
 from telegram.ext import ContextTypes
-from funcionamiento.automation import enviar_a_bot_secundario, iniciar_automation
-
-# ⚠️ REEMPLAZA con el username REAL del bot secundario
-BOT_SECUNDARIO = "@Alphachekerbot"  # Ejemplo: "@MyCheckerBot"
+from funcionamiento.alpha_bridge import enviar_a_alpha
 
 async def bn(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Envía tarjeta a bot secundario"""
+    """Inicia el proceso con @Alphachekerbot"""
     user_id = update.effective_user.id
     
     # Verificar licencia
@@ -30,33 +27,26 @@ async def bn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         cc, mm, yy, cvv = cc_parts
         
-        # Mensaje de procesamiento
+        # Mensaje de que se está enviando a Alpha
         msg = await update.message.reply_text(
-            f"🔄 **Procesando tarjeta...**\n\n"
+            f"🔄 **Enviando a @Alphachekerbot...**\n\n"
             f"💳 **Tarjeta:** `{cc}`\n"
             f"📅 **Expira:** {mm}/{yy}\n"
             f"🔢 **CVV:** {cvv}\n\n"
-            f"⏳ Enviando a bot secundario...",
+            f"⏳ Esperando respuesta de Alpha...",
             parse_mode='Markdown'
         )
         
-        # Iniciar automation
-        client = iniciar_automation()
-        if not client:
-            await msg.edit_text("❌ Error: Sistema de automation no disponible.")
-            return
-        
-        # Enviar y esperar respuesta
-        async with client:
-            await client.start(PHONE_NUMBER)
-            response = await enviar_a_bot_secundario(BOT_SECUNDARIO, cc_data)
-        
-        # Mostrar resultado
-        bin_info = cc[:6]
-        await msg.edit_text(
-            f"✅ **Resultado:**\n\n{response}\n\n🔢 **BIN:** {bin_info}",
-            parse_mode='Markdown'
+        # Enviar a Alpha y guardar referencia
+        success = await enviar_a_alpha(
+            context.bot,
+            update.effective_chat.id,
+            cc_data,
+            msg.message_id
         )
+        
+        if not success:
+            await msg.edit_text("❌ Error conectando con @Alphachekerbot")
             
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {str(e)}")
