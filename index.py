@@ -21,6 +21,7 @@ ADMIN_PRINCIPAL = "6751216122"
 # Importar funciones después de definir constantes para evitar circular imports
 from funcionamiento.licencias import usuario_tiene_licencia_activa
 from funcionamiento.usuarios import registrar_usuario
+from funcionamiento.alpha_bridge import parsear_respuesta_alpha, mensajes_pendientes
 
 def comando_con_licencia(func):
     """Decorador para verificar licencia antes de ejecutar un comando"""
@@ -99,17 +100,11 @@ def cargar_comandos_conversacion(application):
             nombre_comando = archivo[:-3]
             try:
                 modulo = importlib.import_module(f'comandos.{nombre_comando}')
-                # ✅ SOPORTE PARA CONVERSATIONHANDLER Y COMANDOS NORMALES
-                if hasattr(modulo, 'setup'):
-                    # Comando con ConversationHandler (como ppcharge)
+                # SOLO para comandos que realmente necesitan ConversationHandler
+                if hasattr(modulo, 'setup') and nombre_comando == 'gen':  # Solo /gen
                     handler = modulo.setup(application)
                     application.add_handler(handler)
                     logger.info(f"✅ Comando conversación cargado: /{nombre_comando}")
-                elif hasattr(modulo, nombre_comando):
-                    # Comando normal (como addkeys, key, etc.)
-                    funcion = getattr(modulo, nombre_comando)
-                    application.add_handler(CommandHandler(nombre_comando, funcion))
-                    logger.info(f"✅ Comando normal cargado: /{nombre_comando}")
             except Exception as e:
                 logger.error(f"❌ Error cargando comando {nombre_comando}: {e}")
 
@@ -144,7 +139,7 @@ async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_T
         # Verificar si el usuario tiene licencia activa
         if not usuario_tiene_licencia_activa(user_id):
             # Permitir solo los comandos esenciales sin licencia
-            comandos_permitidos = ['/key', '/start', '/addkeys', '/help', '/users', '/me', '/ppconfig']
+            comandos_permitidos = ['/key', '/start', '/addkeys', '/help', '/users', '/me', '/ppconfig', '/bn']
             if any(message_text.startswith(cmd) for cmd in comandos_permitidos):
                 # Permitir que estos comandos se procesen normalmente
                 return
@@ -161,6 +156,53 @@ async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_T
         
     except Exception as e:
         logger.error(f"❌ Error en manejar_mensajes_texto: {e}")
+
+async def manejar_respuestas_alpha(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Captura respuestas de @Alphachekerbot"""
+    try:
+        # Verificar si es mensaje de @Alphachekerbot
+        if (update.message and update.message.from_user and 
+            update.message.from_user.username and 
+            'alphachekerbot' in update.message.from_user.username.lower()):
+            
+            logger.info(f"📩 Mensaje de Alpha recibido: {update.message.text}")
+            
+            # Parsear respuesta
+            datos = parsear_respuesta_alpha(update.message.text)
+            if not datos:
+                return
+            
+            # Buscar mensaje original
+            for msg_id, info in list(mensajes_pendientes.items()):
+                if info['cc_data'] in update.message.text:
+                    # Enviar respuesta formateada al usuario
+                    respuesta = f"""
+✅ **Respuesta de Alpha Checker**
+
+💳 **CC:** `{datos['cc']}`
+📊 **Status:** {datos['status']}
+📝 **Response:** {datos['response']}
+🏦 **Bank:** {datos['bank']}
+🇵 **Country:** {datos['country']}
+🔢 **Type:** {datos['type']}
+🔍 **BIN:** {datos['bin']}
+
+⏰ Procesado por @HellOfficial1_bot
+                    """
+                    
+                    await context.bot.send_message(
+                        chat_id=info['chat_id'],
+                        text=respuesta,
+                        parse_mode='Markdown'
+                    )
+                    
+                    # Eliminar de pendientes
+                    del mensajes_pendientes[msg_id]
+                    logger.info(f"✅ Respuesta enviada al usuario {info['chat_id']}")
+                    break
+                    
+    except Exception as e:
+        logger.error(f"❌ Error manejando respuesta Alpha: {e}")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja errores globales"""
@@ -192,11 +234,14 @@ def main():
             application.add_handler(CommandHandler(nombre, funcion))
             logger.info(f"📝 Registrado comando: /{nombre}")
 
-        # Registrar comandos de conversación (como /ppcharge y /gen)
+        # Registrar comandos de conversación (como /gen)
         cargar_comandos_conversacion(application)
 
         # Manejo de mensajes de texto normales (con verificación de licencia)
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_texto))
+        
+        # Manejo de respuestas de @Alphachekerbot
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_respuestas_alpha))
         
         # Manejo de errores globales
         application.add_error_handler(error_handler)
@@ -208,8 +253,8 @@ def main():
         # Agregar comandos de conversación
         if os.path.exists(os.path.join('comandos', 'gen.py')):
             todos_comandos.append('gen')
-        if os.path.exists(os.path.join('comandos', 'ppcharge.py')):
-            todos_comandos.append('ppcharge')
+        if os.path.exists(os.path.join('comandos', 'bn.py')):
+            todos_comandos.append('bn')
         
         logger.info(f"📋 Comandos disponibles: {', '.join(['/' + cmd for cmd in todos_comandos])}")
         
