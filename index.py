@@ -1,292 +1,327 @@
 # index.py
-# index.py
 import os
 import importlib
-import asyncio
 import logging
+from functools import wraps
+
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram import Update
 from telegram.ext import ContextTypes
-from funcionamiento.tokens import TOKENS
 
-# Configurar logging
+from funcionamiento.tokens import TOKENS
+from funcionamiento.licencias import usuario_tiene_licencia_activa
+from funcionamiento.licencias import canjear_licencia, obtener_tiempo_restante_licencia
+from funcionamiento.usuarios import registrar_usuario
+
+# -------------------------
+# Logging
+# -------------------------
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("bot.log", encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
 )
 logger = logging.getLogger(__name__)
 
-# ID de usuario administrador principal
+# -------------------------
+# Config Admin
+# -------------------------
 ADMIN_PRINCIPAL = "6751216122"
+ADMINISTRADORES = {
+    "6751216122",
+    "1747560314",
+    # Agrega más admins aquí
+}
 
-# Importar funciones después de definir constantes para evitar circular imports
-from funcionamiento.licencias import usuario_tiene_licencia_activa
-from funcionamiento.usuarios import registrar_usuario
-from funcionamiento.alpha_bridge import parsear_respuesta_alpha, mensajes_pendientes
+# Cache de comandos
+COMANDOS_CARGADOS = None
+
+
+def es_administrador(user_id: str, username: str | None = None) -> bool:
+    """Verifica si un usuario es administrador."""
+    user_id_str = str(user_id)
+    username_str = f"@{username.lower()}" if username else ""
+    return (
+        user_id_str in ADMINISTRADORES
+        or username_str in ADMINISTRADORES
+        or user_id_str == ADMIN_PRINCIPAL
+    )
+
 
 def comando_con_licencia(func):
-    """Decorador para verificar licencia antes de ejecutar un comando"""
-    async def wrapper(update, context):
-        user_id = str(update.effective_user.id)
-        username = update.effective_user.username
-        first_name = update.effective_user.first_name
-        last_name = update.effective_user.last_name
-        command_name = func.__name__
-        
-        # Registrar al usuario en la base de datos (SIEMPRE se registra)
-        registrar_usuario(user_id, username, first_name, last_name)
-        
-        # Permitir siempre estos comandos sin verificación de licencia
-        comandos_permitidos_sin_licencia = ['key', 'start', 'addkeys', 'help', 'users', 'me', 'ppconfig']
-        
-        if command_name not in comandos_permitidos_sin_licencia and not usuario_tiene_licencia_activa(user_id):
-            await update.message.reply_text(
-                "❌ No tienes una licencia activa.\n\n"
-                "Usa /key <clave> para canjear una licencia.\n"
-                "Contacta con un administrador si necesitas una clave."
-            )
-            return
-        
-        # Verificación especial para addkeys - solo el admin principal puede usarlo
-        if command_name == 'addkeys' and user_id != ADMIN_PRINCIPAL:
-            await update.message.reply_text("❌ No tienes permisos para usar este comando.")
-            return
-        
-        # Verificación especial para users - solo el admin principal puede usarlo
-        if command_name == 'users' and user_id != ADMIN_PRINCIPAL:
-            await update.message.reply_text("❌ No tienes permisos para usar este comando.")
-            return
-        
-        # Si tiene licencia o es un comando permitido, ejecutar la función
-        return await func(update, context)
-    
+    """Decorador para verificar licencia y permisos antes de ejecutar un comando."""
+
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        try:
+            if update.effective_user is None:
+                return
+
+            user_id = str(update.effective_user.id)
+            username = update.effective_user.username
+            first_name = update.effective_user.first_name
+            last_name = update.effective_user.last_name
+            command_name = func.__name__
+
+            # Registrar usuario siempre
+            registrar_usuario(user_id, username, first_name, last_name)
+
+            # Comandos permitidos sin licencia
+            comandos_permitidos_sin_licencia = {
+                "key",
+                "start",
+                "addkeys",
+                "help",
+                "users",
+                "me",
+                "ppconfig",
+                "premium",
+                "ping",
+            }
+
+            # Admins: sin verificación
+            if es_administrador(user_id, username):
+                return await func(update, context)
+
+            # Requiere licencia si no está en la lista blanca
+            if (
+                command_name not in comandos_permitidos_sin_licencia
+                and not usuario_tiene_licencia_activa(user_id)
+            ):
+                if update.message:
+                    await update.message.reply_text(
+                        "❌ No tienes una licencia activa.\n\n"
+                        "Usa /key <clave> para canjear una licencia.\n"
+                        "Contacta con un administrador si necesitas una clave."
+                    )
+                return
+
+            # Verificaciones de permisos para comandos admin
+            comandos_admin = {"addkeys", "users", "premium"}
+            if command_name in comandos_admin and not es_administrador(user_id, username):
+                if update.message:
+                    await update.message.reply_text("❌ No tienes permisos para usar este comando.")
+                return
+
+            return await func(update, context)
+        except Exception as e:
+            logger.error(f"❌ Error en wrapper de comando '{func.__name__}': {e}", exc_info=True)
+
     return wrapper
 
+
+def _obtener_funcion_comando(modulo, nombre_archivo: str):
+    """
+    Intenta obtener la función manejadora del módulo con estas prioridades:
+    1) async def <nombre_archivo>(update, context)
+    2) async def handle(update, context)
+    3) COMMAND (callable)
+    """
+    func = getattr(modulo, nombre_archivo, None)
+    if callable(func):
+        return func
+    func = getattr(modulo, "handle", None)
+    if callable(func):
+        return func
+    func = getattr(modulo, "COMMAND", None)
+    if callable(func):
+        return func
+    return None
+
+
 def cargar_comandos():
-    """Carga automáticamente todos los comandos de la carpeta 'comandos'"""
+    """Carga automáticamente todos los comandos de la carpeta 'comandos'."""
+    global COMANDOS_CARGADOS
+    if COMANDOS_CARGADOS is not None:
+        return COMANDOS_CARGADOS
+
     comandos = {}
-    ruta_comandos = os.path.join(os.path.dirname(__file__), 'comandos')
-    
+    ruta_comandos = os.path.join(os.path.dirname(__file__), "comandos")
+
     if not os.path.exists(ruta_comandos):
         logger.error("❌ Carpeta 'comandos' no encontrada")
-        return comandos
-    
+        COMANDOS_CARGADOS = {}
+        return COMANDOS_CARGADOS
+
     for archivo in os.listdir(ruta_comandos):
-        if archivo.endswith('.py') and archivo != '__init__.py':
-            nombre_comando = archivo[:-3]  # Quita la extensión .py
-            try:
-                modulo = importlib.import_module(f'comandos.{nombre_comando}')
-                if hasattr(modulo, nombre_comando):
-                    # Aplicar el decorador de verificación de licencia
-                    funcion_original = getattr(modulo, nombre_comando)
-                    funcion_con_licencia = comando_con_licencia(funcion_original)
-                    comandos[nombre_comando] = funcion_con_licencia
-                    logger.info(f"✅ Comando cargado: {nombre_comando} (con verificación de licencia)")
-                else:
-                    logger.warning(f"⚠️ Función {nombre_comando} no encontrada en {archivo}")
-            except Exception as e:
-                logger.error(f"❌ Error cargando {nombre_comando}: {e}")
-    
+        if not (archivo.endswith(".py") and archivo != "__init__.py"):
+            continue
+
+        nombre = archivo[:-3]
+        try:
+            # Import relativo para evitar problemas de CWD
+            modulo = importlib.import_module(f".{nombre}", package="comandos")
+            func = _obtener_funcion_comando(modulo, nombre)
+
+            if callable(func):
+                comandos[nombre] = comando_con_licencia(func)
+                logger.info(f"✅ Comando cargado: /{nombre}")
+            else:
+                logger.warning(
+                    f"⚠️ No se encontró función para '{nombre}'. "
+                    f"Define '{nombre}()' o 'handle()' o 'COMMAND'."
+                )
+        except Exception as e:
+            logger.error(f"❌ Error cargando comando '{nombre}': {e}", exc_info=True)
+
+    COMANDOS_CARGADOS = comandos
     return comandos
 
-def cargar_comandos_conversacion(application):
-    """Carga comandos que necesitan ConversationHandler"""
-    ruta_comandos = os.path.join(os.path.dirname(__file__), 'comandos')
-    
+
+def cargar_comandos_conversacion(application: Application):
+    """Carga comandos que usan ConversationHandler mediante una función setup(application)."""
+    ruta_comandos = os.path.join(os.path.dirname(__file__), "comandos")
     if not os.path.exists(ruta_comandos):
         return
-    
-    for archivo in os.listdir(ruta_comandos):
-        if archivo.endswith('.py') and archivo != '__init__.py':
-            nombre_comando = archivo[:-3]
-            try:
-                modulo = importlib.import_module(f'comandos.{nombre_comando}')
-                # SOLO para comandos que realmente necesitan ConversationHandler
-                if hasattr(modulo, 'setup') and nombre_comando == 'gen':  # Solo /gen
-                    handler = modulo.setup(application)
-                    application.add_handler(handler)
-                    logger.info(f"✅ Comando conversación cargado: /{nombre_comando}")
-            except Exception as e:
-                logger.error(f"❌ Error cargando comando {nombre_comando}: {e}")
 
-def eliminar_webhook_sincrono(token):
-    """Elimina webhook de forma síncrona (sin asyncio)"""
+    for archivo in os.listdir(ruta_comandos):
+        if not (archivo.endswith(".py") and archivo != "__init__.py"):
+            continue
+
+        nombre = archivo[:-3]
+        try:
+            modulo = importlib.import_module(f".{nombre}", package="comandos")
+            if hasattr(modulo, "setup"):
+                handler = modulo.setup(application)
+                application.add_handler(handler)
+                logger.info(f"✅ Comando de conversación cargado: /{nombre}")
+        except Exception as e:
+            logger.error(f"❌ Error cargando conversación '{nombre}': {e}", exc_info=True)
+
+
+def eliminar_webhook_sincrono(token: str):
+    """Elimina webhook de forma síncrona para asegurar polling limpio."""
     import requests
+
     try:
-        response = requests.get(
-            f"https://api.telegram.org/bot{token}/deleteWebhook?drop_pending_updates=true"
+        resp = requests.get(
+            f"https://api.telegram.org/bot{token}/deleteWebhook?drop_pending_updates=true",
+            timeout=10,
         )
-        if response.status_code == 200:
+        if resp.status_code == 200:
             logger.info("✅ Webhook eliminado correctamente")
         else:
-            logger.warning(f"⚠️ No se pudo eliminar webhook: {response.status_code}")
+            logger.warning(f"⚠️ No se pudo eliminar webhook: {resp.status_code}")
     except Exception as e:
         logger.error(f"❌ Error eliminando webhook: {e}")
 
-async def manejar_mensajes_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja mensajes de texto normales con verificación de licencia"""
+
+async def manejar_todos_los_mensajes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja TODOS los mensajes de texto que NO son comandos /slash y soporta .comandos."""
     try:
+        if update.effective_user is None:
+            return
+        if update.message is None or update.message.text is None:
+            return  # ignorar stickers, fotos, etc.
+
         user_id = str(update.effective_user.id)
         username = update.effective_user.username
         first_name = update.effective_user.first_name
         last_name = update.effective_user.last_name
-        message_text = update.message.text
-        
-        # Registrar al usuario en la base de datos (SIEMPRE se registra)
+        message_text = update.message.text.strip()
+
+        # Registrar al usuario siempre
         registrar_usuario(user_id, username, first_name, last_name)
-        
-        logger.info(f"📩 Mensaje recibido de {user_id}: {message_text}")
-        
-        # Verificar si el usuario tiene licencia activa
-        if not usuario_tiene_licencia_activa(user_id):
-            # Permitir solo los comandos esenciales sin licencia
-            comandos_permitidos = ['/key', '/start', '/addkeys', '/help', '/users', '/me', '/ppconfig', '/bn']
-            if any(message_text.startswith(cmd) for cmd in comandos_permitidos):
-                # Permitir que estos comandos se procesen normalmente
+        logger.info(f"📩 Mensaje recibido: {message_text}")
+
+        # Comandos con punto: .comando arg1 arg2 ...
+        if message_text.startswith("."):
+            partes = message_text[1:].split()
+            if not partes:
+                return
+
+            comando = partes[0].lower()
+            args = partes[1:] if len(partes) > 1 else []
+            logger.info(f"🔍 Comando con punto detectado: .{comando}, args: {args}")
+
+            comandos_disponibles = COMANDOS_CARGADOS or cargar_comandos()
+
+            if comando in comandos_disponibles:
+                logger.info(f"✅ Ejecutando comando: .{comando}")
+                context.args = args  # simular args para handlers
+                await comandos_disponibles[comando](update, context)
                 return
             else:
-                # Bloquear otros mensajes si no tiene licencia
+                await update.message.reply_text(f"❌ Comando '.{comando}' no reconocido")
+                return
+
+        # Mensajes normales (no comando): exigir licencia a no-admins
+        if not es_administrador(user_id, username):
+            if not usuario_tiene_licencia_activa(user_id):
                 await update.message.reply_text(
                     "❌ No tienes una licencia activa.\n\n"
                     "Usa /key <clave> para canjear una licencia.\n"
                     "Contacta con un administrador si necesitas una clave."
                 )
                 return
-        
-        # Si tiene licencia, procesar el mensaje normalmente
-        
+
     except Exception as e:
-        logger.error(f"❌ Error en manejar_mensajes_texto: {e}")
+        logger.error(f"❌ Error en manejar_todos_los_mensajes: {e}", exc_info=True)
 
-async def manejar_respuestas_alpha(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Captura respuestas de @Alphachekerbot"""
-    try:
-        # Verificar si es mensaje de @Alphachekerbot
-        if (update.message and update.message.from_user and 
-            update.message.from_user.username and 
-            'alphachekerbot' in update.message.from_user.username.lower()):
-            
-            logger.info(f"📩 Mensaje de Alpha recibido: {update.message.text}")
-            
-            # Parsear respuesta
-            datos = parsear_respuesta_alpha(update.message.text)
-            if not datos:
-                return
-            
-            # Buscar mensaje original
-            for msg_id, info in list(mensajes_pendientes.items()):
-                if info['cc_data'] in update.message.text:
-                    # Enviar respuesta formateada al usuario
-                    respuesta = f"""
-✅ **Respuesta de Alpha Checker**
 
-💳 **CC:** `{datos['cc']}`
-📊 **Status:** {datos['status']}
-📝 **Response:** {datos['response']}
-🏦 **Bank:** {datos['bank']}
-🇵 **Country:** {datos['country']}
-🔢 **Type:** {datos['type']}
-🔍 **BIN:** {datos['bin']}
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Manejador global de errores."""
+    logger.error(f"🚨 Error en update {update}: {context.error}", exc_info=True)
 
-⏰ Procesado por @HellOfficial1_bot
-                    """
-                    
-                    await context.bot.send_message(
-                        chat_id=info['chat_id'],
-                        text=respuesta,
-                        parse_mode='Markdown'
-                    )
-                    
-                    # Eliminar de pendientes
-                    del mensajes_pendientes[msg_id]
-                    logger.info(f"✅ Respuesta enviada al usuario {info['chat_id']}")
-                    break
-                    
-    except Exception as e:
-        logger.error(f"❌ Error manejando respuesta Alpha: {e}")
-
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja errores globales"""
-    logger.error(f"🚨 Error en update {update}: {context.error}")
 
 def main():
     try:
         logger.info("🚀 Iniciando bot...")
-        
-        # Cargar comandos automáticamente
+
+        # Cargar comandos una sola vez
         comandos = cargar_comandos()
-        
         if not comandos:
             logger.error("⚠️ No se encontraron comandos. Cerrando...")
             return
 
-        # Obtener token
+        # Token
         token = TOKENS["BOT_1"]
         logger.info(f"🔑 Token cargado: {token[:10]}...")
-        
-        # Eliminar webhook de forma SÍNCRONA (evita problemas de event loop)
+
+        # Asegurar polling limpio
         eliminar_webhook_sincrono(token)
-        
-        # Crear aplicación
+
+        # App Telegram
         application = Application.builder().token(token).build()
 
-        # Registrar comandos automáticamente
+        # Registrar comandos /slash
         for nombre, funcion in comandos.items():
             application.add_handler(CommandHandler(nombre, funcion))
             logger.info(f"📝 Registrado comando: /{nombre}")
 
-        # Registrar comandos de conversación (como /gen)
+        # Cargar ConversationHandlers (si los hay)
         cargar_comandos_conversacion(application)
 
-        # Manejo de mensajes de texto normales (con verificación de licencia)
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_texto))
-        
-        # Manejo de respuestas de @Alphachekerbot
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_respuestas_alpha))
-        
-        # Manejo de errores globales
+        # Handler de texto que NO capture /comandos
+        application.add_handler(
+            MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_todos_los_mensajes)
+        )
+
+        # Errores globales
         application.add_error_handler(error_handler)
 
         logger.info("🤖 Bot configurado correctamente")
-        
-        # Obtener lista de comandos registrados
-        todos_comandos = list(comandos.keys())
-        # Agregar comandos de conversación
-        if os.path.exists(os.path.join('comandos', 'gen.py')):
-            todos_comandos.append('gen')
-        if os.path.exists(os.path.join('comandos', 'bn.py')):
-            todos_comandos.append('bn')
-        
-        logger.info(f"📋 Comandos disponibles: {', '.join(['/' + cmd for cmd in todos_comandos])}")
-        
-        # Iniciar polling - FORMA CORRECTA para el event loop
+        logger.info(f"👑 Administradores: {ADMINISTRADORES}")
+
+        lista = list(comandos.keys())
+        logger.info("📋 Comandos disponibles /: " + ", ".join("/" + c for c in lista))
+        logger.info("📋 Comandos disponibles .: " + ", ".join("." + c for c in lista))
+
+        # Polling
         logger.info("🔄 Iniciando polling...")
-        
-        # Ejecutar en el event loop apropiado
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            loop.run_until_complete(application.initialize())
-            loop.run_until_complete(application.start())
-            loop.run_until_complete(application.updater.start_polling(
-                poll_interval=1.0,
-                timeout=30,
-                drop_pending_updates=True,
-                allowed_updates=["message", "callback_query"]
-            ))
-            logger.info("✅ Bot ejecutándose correctamente")
-            loop.run_forever()
-            
-        except KeyboardInterrupt:
-            logger.info("⏹️ Deteniendo bot...")
-        finally:
-            loop.run_until_complete(application.stop())
-            loop.run_until_complete(application.shutdown())
-            loop.close()
-            
+        application.run_polling(
+            poll_interval=1.0,
+            timeout=30,
+            drop_pending_updates=True,
+            allowed_updates=["message", "callback_query"],
+        )
+
     except Exception as e:
-        logger.error(f"❌ Error crítico al iniciar el bot: {e}", exc_info=True)
+        logger.error(f"❌ Error crítico: {e}", exc_info=True)
+
 
 if __name__ == "__main__":
     main()
