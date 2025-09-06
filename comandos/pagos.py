@@ -10,7 +10,7 @@ async def pagos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Transf. México. 🇲🇽\n"
         "• Paypal. 🌐"
         " "
-        "SELLERS AUTORIZADOS.⚠️"
+        "SELLERS AUTORIZADOS.⚠️\n"
         " "
         "@MR_JACK_SON\n"
         "@fer889999\n"
