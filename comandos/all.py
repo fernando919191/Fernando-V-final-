@@ -23,54 +23,37 @@ async def all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("📭 No hay usuarios registrados en el bot.")
             return
         
-        # Crear mención de todos los usuarios
-        menciones = []
-        for usuario in usuarios:
-            user_id_str = str(usuario['user_id'])
-            first_name = usuario['first_name'] or 'Usuario'
-            
-            # Crear mención (si tiene username) o mostrar nombre
-            if usuario.get('username'):
-                menciones.append(f"@{usuario['username']}")
-            else:
-                menciones.append(f"[{first_name}](tg://user?id={user_id_str})")
+        # Mensaje inicial
+        await update.message.reply_text("📢 **Iniciando mención global...**", parse_mode='Markdown')
         
-        # Dividir las menciones en grupos para evitar límites de Telegram
-        grupo_menciones = []
-        grupo_actual = []
-        caracteres_actual = 0
-        
-        for mencion in menciones:
-            # Telegram tiene límite de ~4000 caracteres por mensaje
-            if caracteres_actual + len(mencion) + 2 > 4000:
-                grupo_menciones.append(grupo_actual)
-                grupo_actual = []
-                caracteres_actual = 0
-            
-            grupo_actual.append(mencion)
-            caracteres_actual += len(mencion) + 2  # +2 por la coma y espacio
-        
-        if grupo_actual:
-            grupo_menciones.append(grupo_actual)
-        
-        # Enviar las menciones
         total_usuarios = len(usuarios)
+        mensajes_enviados = 0
         
-        for i, grupo in enumerate(grupo_menciones):
-            mensaje = f"📢 **Mención global** - {total_usuarios} usuarios\n\n"
+        # Dividir usuarios en grupos de 50 para evitar límites
+        grupo_size = 50
+        for i in range(0, total_usuarios, grupo_size):
+            grupo = usuarios[i:i + grupo_size]
+            mensaje = "📢 **Mención global**\n\n"
             
-            if len(grupo_menciones) > 1:
-                mensaje += f"📋 Parte {i + 1} de {len(grupo_menciones)}\n\n"
+            for usuario in grupo:
+                user_id_str = str(usuario['user_id'])
+                first_name = usuario.get('first_name', 'Usuario')
+                
+                # Usar mención simple con user_id
+                mensaje += f"👤 [{first_name}](tg://user?id={user_id_str})\n"
             
-            mensaje += ", ".join(grupo)
-            
-            await update.message.reply_text(mensaje, parse_mode='Markdown')
+            try:
+                await update.message.reply_text(mensaje, parse_mode='Markdown', disable_web_page_preview=True)
+                mensajes_enviados += 1
+            except Exception as e:
+                logger.error(f"Error enviando mensaje de mención: {e}")
+                continue
         
         # Mensaje de confirmación
         await update.message.reply_text(
             f"✅ **Mención global completada**\n\n"
             f"👥 **Total de usuarios:** {total_usuarios}\n"
-            f"📤 **Mensajes enviados:** {len(grupo_menciones)}",
+            f"📤 **Mensajes enviados:** {mensajes_enviados}",
             parse_mode='Markdown'
         )
         
