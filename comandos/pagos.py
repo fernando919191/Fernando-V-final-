@@ -4,7 +4,7 @@ from funcionamiento.config import PREFIX
 
 async def pagos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje = (
-        "**Métodos de pago**\n\n"
+        "<b>Métodos de pago</b>\n\n"
         "• Binance. 🌐\n"
         "• Zinli. 🌐\n"
         "• Transf. Venezuela. 🇻🇪\n"
@@ -12,9 +12,8 @@ async def pagos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Paypal. 🌐"
     )
     
-    await update.message.reply_text(mensaje, parse_mode='Markdown')
+    await update.message.reply_text(mensaje, parse_mode='HTML')
 
-# Función que probablemente espera tu sistema de auto-detección
 def get_handler():
     from telegram.ext import CommandHandler
     return CommandHandler('pagos', pagos_command)
