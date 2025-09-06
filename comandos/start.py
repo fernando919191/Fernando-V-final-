@@ -16,7 +16,15 @@ async def start(update, context):
             "¡Hola! 👋 Bienvenido al bot.\n\n"
             "❌ No tienes una licencia activa.\n\n"
             "Para usar el bot, necesitas canjear una clave con /key <clave>\n"
-            "Si no tienes una clave, contacta con un administrador."
+            "Si no tienes una clave, contacta con un administrador.\n\n"
+            "Sellers:\n"
+            "@MR_JACK_SON\n"
+            "@fer889999\n"
+            "@Yayo561\n"
+            "@yenderx\n"
+            "@Morganbennie\n"
+            "@Ozzwall\n"
         )
     
+
     await update.message.reply_text(mensaje)
