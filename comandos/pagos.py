@@ -12,12 +12,12 @@ async def pagos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         " "
         "SELLERS AUTORIZADOS.⚠️"
         " "
-        "@MR_JACK_SON"
-        "@fer889999"
-        "@Yayo561 "
-        "@yenderx "
-        "@Morganbennie "
-        "@Ozzwall "
+        "@MR_JACK_SON\n"
+        "@fer889999\n"
+        "@Yayo561\n"
+        "@yenderx\n"
+        "@Morganbennie\n"
+        "@Ozzwall\n"
         " "
     )
     await update.message.reply_text(mensaje, parse_mode='Markdown')
