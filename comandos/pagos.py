@@ -14,7 +14,7 @@ async def pagos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(mensaje, parse_mode='Markdown')
 
-# Si usas handlers con decorators o necesitas exportar la función
+# Función que probablemente espera tu sistema de auto-detección
 def get_handler():
     from telegram.ext import CommandHandler
     return CommandHandler('pagos', pagos_command)
