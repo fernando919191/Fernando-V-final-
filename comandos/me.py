@@ -1,16 +1,14 @@
-# comandos/me.py
 import logging
 from datetime import datetime
 from telegram import Update
 from telegram.ext import ContextTypes
-from funcionamiento.usuarios import obtener_info_usuario_completa, registrar_usuario
-from funcionamiento.licencias import usuario_tiene_licencia_activa, obtener_tiempo_restante_licencia
+from funcionamiento.usuarios import obtener_info_usuario_completa, registrar_usuario, reparar_tabla_usuarios
 from index import es_administrador
 
 logger = logging.getLogger(__name__)
 
 async def me(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Muestra información detallada del usuario - Registra automáticamente si no existe"""
+    """Muestra información detallada del usuario"""
     try:
         user_id = str(update.effective_user.id)
         username = update.effective_user.username or "Sin username"
@@ -19,7 +17,10 @@ async def me(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         logger.info(f"🔍 Ejecutando comando /me para usuario: {user_id}")
         
-        # Registrar usuario primero (esto crea la tabla si no existe)
+        # Asegurar que la tabla esté correcta
+        reparar_tabla_usuarios()
+        
+        # Registrar/actualizar usuario
         registro_exitoso = registrar_usuario(user_id, username, first_name, last_name)
         
         if not registro_exitoso:
@@ -33,44 +34,59 @@ async def me(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ No se pudo obtener tu información. Contacta con un administrador.")
             return
         
-        # Determinar si tiene licencia activa
-        tiene_licencia = usuario_tiene_licencia_activa(user_id)
-        logger.info(f"📊 Licencia usuario {user_id}: {'ACTIVA' if tiene_licencia else 'INACTIVA'}")
+        # Determinar estado premium
+        es_premium = info_usuario.get('es_premium', False)
+        premium_hasta = info_usuario.get('premium_hasta')
         
-        # Obtener días restantes de premium
+        # Calcular tiempo restante si es premium
         tiempo_restante = "0d-0h-0m-0s"
-        if info_usuario['es_premium'] and info_usuario.get('premium_hasta'):
+        if es_premium and premium_hasta:
             try:
-                dt_premium = datetime.strptime(info_usuario['premium_hasta'], '%Y-%m-%d %H:%M:%S')
-                delta = dt_premium - datetime.now()
-                days = delta.days
-                hours, remainder = divmod(delta.seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                tiempo_restante = f"{days}d-{hours}h-{minutes}m-{seconds}s"
-            except Exception:
+                if isinstance(premium_hasta, str):
+                    dt_premium = datetime.strptime(premium_hasta, '%Y-%m-%d %H:%M:%S')
+                else:
+                    dt_premium = premium_hasta
+                
+                ahora = datetime.now()
+                if dt_premium > ahora:
+                    delta = dt_premium - ahora
+                    days = delta.days
+                    hours, remainder = divmod(delta.seconds, 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    tiempo_restante = f"{days}d-{hours}h-{minutes}m-{seconds}s"
+                else:
+                    tiempo_restante = "0d-0h-0m-0s"
+                    es_premium = False  # Actualizar estado si ya expiró
+                    
+            except Exception as e:
+                logger.warning(f"Error calculando tiempo premium para {user_id}: {e}")
                 tiempo_restante = "0d-0h-0m-0s"
-        else:
-            # Si no es premium, puedes dejarlo en cero o mostrar lo que ya tienes
-            tiempo_restante = "0d-0h-0m-0s"
-
+                es_premium = False
+        
         # Formatear fecha de registro
-        fecha_registro = info_usuario.get('fecha_registro', datetime.now())
+        fecha_registro = info_usuario.get('fecha_registro')
+        fecha_formateada = "Desconocida"
         
-        if isinstance(fecha_registro, str):
+        if fecha_registro:
             try:
-                fecha_registro = datetime.strptime(fecha_registro, '%Y-%m-%d %H:%M:%S')
-            except:
-                fecha_registro = datetime.now()
+                if isinstance(fecha_registro, str):
+                    fecha_dt = datetime.strptime(fecha_registro, '%Y-%m-%d %H:%M:%S')
+                else:
+                    fecha_dt = fecha_registro
+                fecha_formateada = fecha_dt.strftime('%d/%m/%y - %I:%M%p').lower()
+            except Exception:
+                fecha_formateada = "Desconocida"
         
-        fecha_formateada = fecha_registro.strftime('%d/%m/%y - %I:%M%p').lower()
-        
-        # Plan y estado basado en información de usuario
-        if info_usuario['es_premium']:
-            plan = "Premium"
+        # Determinar plan y estado
+        if es_premium:
+            plan = "Premium 🎯"
             status = "Active ✅"
         else:
-            plan = "Free"
+            plan = "Free 🎯"
             status = "Inactive ❌"
+        
+        # Verificar si es administrador
+        es_admin = es_administrador(user_id, username)
         
         # Construir respuesta
         respuesta = f"""
@@ -78,17 +94,17 @@ async def me(update: Update, context: ContextTypes.DEFAULT_TYPE):
 - - - - - - - - - - - - - - -
 ⋄ User : {first_name} {last_name} - {user_id}
 ⋄ Username : @{username} 
-⋄ Rank : [{'Admin 👑' if es_administrador(user_id, username) else 'User 👤'}]  |  BannedϞ No
+⋄ Rank : [{'Admin 👑' if es_admin else 'User 👤'}]  |  BannedϞ No
 ⋄ Status : {status}
 - - - - - - - - - - - - - - -
-⋄ Plan : {plan} 🎯
+⋄ Plan : {plan}
 ⋄ Days : {tiempo_restante}
 ⋄ Regist: {fecha_formateada}
 - - - - - - - - - - - - - - -
 💡 Usa /help para ver comandos disponibles
 """
         
-        logger.info(f"✅ Información mostrada exitosamente para usuario: {user_id}")
+        logger.info(f"✅ Información mostrada para usuario: {user_id} - Premium: {es_premium}")
         await update.message.reply_text(respuesta)
         
     except Exception as e:
