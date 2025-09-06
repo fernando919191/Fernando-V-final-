@@ -6,15 +6,11 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """
 🤖 *COMANDOS DISPONIBLES*:
 
-*/start* - Iniciar el bot
-*/ping* - Verificar latencia  
-*/bin* <6 dígitos> - Consultar información BIN
-*/gen* - Generador de tarjetas (conversación)
-*/help* - Mostrar esta ayuda
-
-💡 *Ejemplos*:
-• `/bin 416916`
-• `/ping`
-• `/gen` - 4169167362|11|29
+*/start* - Iniciar el bot. 
+*/bin* <6 dígitos> - Consultar información BIN.
+*/gen* - Generador de tarjetas.
+*/help* - Mostrar esta ayuda.
+*/me* - Verifica tu información de usuario.
+*/pagos* - Lista de métodos de pago aceptados.
 """
     await update.message.reply_text(help_text, parse_mode='Markdown')
