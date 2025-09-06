@@ -1,4 +1,3 @@
-# funcionamiento/usuarios.py
 import sqlite3
 from datetime import datetime
 import logging
@@ -15,10 +14,16 @@ def obtener_info_usuario_completa(user_id):
     ''', (user_id,))
     usuario = cursor.fetchone()
     conn.close()
+    
     if usuario:
         premium_hasta = usuario[6]
         ahora = datetime.now()
-        if premium_hasta:
+        
+        # Verificar si premium_hasta es None o vacío
+        if premium_hasta is None or premium_hasta == '':
+            es_premium = False
+            dias_restantes = 0
+        else:
             try:
                 dt_premium = datetime.strptime(premium_hasta, '%Y-%m-%d %H:%M:%S')
                 es_premium = dt_premium > ahora
@@ -26,9 +31,7 @@ def obtener_info_usuario_completa(user_id):
             except Exception:
                 es_premium = False
                 dias_restantes = 0
-        else:
-            es_premium = False
-            dias_restantes = 0
+        
         return {
             'user_id': usuario[0],
             'username': usuario[1],
@@ -56,7 +59,8 @@ def registrar_usuario(user_id, username, first_name, last_name):
                 first_name TEXT,
                 last_name TEXT,
                 fecha_registro TEXT,
-                ultima_vez_visto TEXT
+                ultima_vez_visto TEXT,
+                premium_hasta TEXT
             )
         ''')
         
@@ -78,8 +82,8 @@ def registrar_usuario(user_id, username, first_name, last_name):
             # Insertar nuevo usuario
             cursor.execute('''
                 INSERT INTO usuarios 
-                (user_id, username, first_name, last_name, fecha_registro, ultima_vez_visto)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (user_id, username, first_name, last_name, fecha_registro, ultima_vez_visto, premium_hasta)
+                VALUES (?, ?, ?, ?, ?, ?, NULL)
             ''', (user_id, username, first_name, last_name, ahora, ahora))
             logger.info(f"👤 Nuevo usuario registrado: {user_id}")
         
@@ -160,8 +164,8 @@ def crear_usuario_basico(user_id, username=None, first_name=None, last_name=None
         cursor = conn.cursor()
         ahora = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         cursor.execute('''
-            INSERT OR IGNORE INTO usuarios (user_id, username, first_name, last_name, fecha_registro, ultima_vez_visto)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO usuarios (user_id, username, first_name, last_name, fecha_registro, ultima_vez_visto, premium_hasta)
+            VALUES (?, ?, ?, ?, ?, ?, NULL)
         ''', (user_id, username, first_name, last_name, ahora, ahora))
         conn.commit()
         conn.close()
@@ -207,12 +211,29 @@ def actualizar_usuario_premium(user_id, fecha_expiracion):
         print(f"Error actualizando premium: {e}")
         return False
 
+def quitar_usuario_premium(user_id):
+    """Elimina el estado premium de un usuario estableciendo premium_hasta a NULL"""
+    try:
+        conn = sqlite3.connect('database.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE usuarios
+            SET premium_hasta = NULL
+            WHERE user_id = ?
+        ''', (user_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"❌ Error en quitar_usuario_premium: {e}", exc_info=True)
+        return False
+
 def actualizar_estado_licencia(user_id, activa):
     """
     Actualiza el estado de la licencia de un usuario.
     Parámetros:
         user_id: ID del usuario
-        activa: 1 (activa) o 0 (inactiva)
+        activa: 1 (activa) or 0 (inactiva)
     """
     try:
         conn = sqlite3.connect('database.db')
