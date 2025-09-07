@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import ContextTypes
-from funcionamiento.usuarios import obtener_usuario_por_id, registrar_usuario, actualizar_usuario_premium, crear_usuario_basico
+from funcionamiento.usuarios import obtener_usuario_por_id, registrar_usuario, actualizar_usuario_premium
 from funcionamiento.licencias import activar_licencia_manual
 from index import es_administrador
 
@@ -42,34 +42,23 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             dias = int(tiempo_str)
         
-        # PRIMERO crear el usuario si no existe
+        # Obtener información del usuario objetivo
         usuario_obj = obtener_usuario_por_id(target_user_id)
         
+        # Si el usuario no existe en la BD, intentar registrarlo
         if not usuario_obj:
-            # Crear usuario con información mínima
-            try:
-                # Intentar obtener información del usuario de Telegram
-                try:
-                    user_chat = await context.bot.get_chat(target_user_id)
-                    first_name = user_chat.first_name or "Usuario"
-                    last_name = user_chat.last_name or ""
-                    username = user_chat.username or "Sin username"
-                except:
-                    first_name = "Usuario"
-                    last_name = ""
-                    username = "Sin username"
-                
-                # Crear usuario en la base de datos
-                crear_usuario_basico(target_user_id, username, first_name, last_name)
-                usuario_obj = obtener_usuario_por_id(target_user_id)
-                
-                if not usuario_obj:
-                    await update.message.reply_text(f"❌ No se pudo crear el usuario con ID: {target_user_id}")
-                    return
-                    
-            except Exception as e:
-                logger.error(f"Error creando usuario {target_user_id}: {e}")
-                await update.message.reply_text(f"❌ Error al crear usuario: {target_user_id}")
+            # Para registrar necesitamos más información, pero como mínimo creamos el registro básico
+            # En una implementación real, podrías necesitar obtener info del usuario de Telegram
+            from funcionamiento.usuarios import crear_usuario_basico
+            exito_creacion = crear_usuario_basico(target_user_id, "Usuario", "Sin username")
+            
+            if not exito_creacion:
+                await update.message.reply_text(f"❌ No se pudo crear el usuario con ID: {target_user_id}")
+                return
+            
+            usuario_obj = obtener_usuario_por_id(target_user_id)
+            if not usuario_obj:
+                await update.message.reply_text(f"❌ Error al crear usuario con ID: {target_user_id}")
                 return
         
         # Activar la licencia
@@ -78,7 +67,6 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if exito:
             fecha_expiracion = datetime.now() + timedelta(days=dias)
             actualizar_usuario_premium(target_user_id, fecha_expiracion)
-            
             respuesta = (
                 f"✅ **Premium Activado Exitosamente**\n\n"
                 f"👤 **Usuario ID:** `{target_user_id}`\n"
