@@ -1,22 +1,96 @@
+# comandos/remove.py
 import logging
+import sqlite3
 from telegram import Update
 from telegram.ext import ContextTypes
-from funcionamiento.usuarios import obtener_info_usuario_completa, quitar_usuario_premium
-from index import es_administrador
+
+# Configuración de la base de datos
+DB_PATH = 'database.db'
 
 logger = logging.getLogger(__name__)
 
+# =========================
+# Conexión a la base de datos
+# =========================
+def get_db_connection():
+    """Establece conexión con la base de datos"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+# =========================
+# Funciones de base de datos (SIMPLIFICADAS)
+# =========================
+def obtener_info_usuario_completa(user_id: str) -> dict:
+    """Obtiene información completa de un usuario desde la base de datos"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Obtener información del usuario
+        cursor.execute("SELECT * FROM usuarios WHERE user_id = ?", (user_id,))
+        usuario = cursor.fetchone()
+        
+        if not usuario:
+            return {}
+        
+        usuario_dict = dict(usuario)
+        
+        # Verificar si tiene licencia activa
+        cursor.execute("""
+            SELECT COUNT(*) as count 
+            FROM licencias 
+            WHERE user_id = ? AND activa = 1 AND fecha_expiracion > datetime('now')
+        """, (user_id,))
+        licencia_result = cursor.fetchone()
+        
+        usuario_dict['es_premium'] = licencia_result['count'] > 0 if licencia_result else False
+        
+        return usuario_dict
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo info usuario {user_id}: {e}")
+        return {}
+    finally:
+        if conn:
+            conn.close()
+
+def quitar_usuario_premium(user_id: str) -> bool:
+    """Quita el premium de un usuario desactivando sus licencias"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Desactivar todas las licencias del usuario
+        cursor.execute("""
+            UPDATE licencias 
+            SET activa = 0 
+            WHERE user_id = ? AND activa = 1
+        """, (user_id,))
+        
+        conn.commit()
+        return cursor.rowcount > 0
+        
+    except Exception as e:
+        logger.error(f"Error quitando premium a usuario {user_id}: {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+# =========================
+# Handler principal (¡ESTA ES LA FUNCIÓN QUE BUSCA EL SISTEMA!)
+# =========================
 async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando para quitar premium a usuarios por user_id"""
     try:
-        user_id = str(update.effective_user.id)
-        username = update.effective_user.username
+        # NOTA: La verificación de administrador ya se hace AUTOMÁTICAMENTE
+        # por el decorador @comando_con_licencia en index.py
+        # ¡No necesitamos verificar is_admin en la base de datos!
         
-        if not es_administrador(user_id, username):
-            await update.message.reply_text("❌ Solo administradores pueden usar este comando.")
-            return
-        
-        if len(context.args) < 1:
+        if not context.args or len(context.args) < 1:
             await update.message.reply_text(
                 "📝 Uso: /remove <user_id>\n"
                 "Ejemplo: /remove 123456789"
@@ -24,7 +98,7 @@ async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Obtener user_id objetivo
-        target_user_id = context.args[0]
+        target_user_id = context.args[0].strip()
         
         # Validar que el user_id sea numérico
         if not target_user_id.isdigit():
@@ -47,11 +121,15 @@ async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
         exito = quitar_usuario_premium(target_user_id)
         
         if exito:
+            # Construir respuesta
+            nombre = f"{usuario_info.get('first_name', '')} {usuario_info.get('last_name', '')}".strip()
+            username = usuario_info.get('username', 'N/A')
+            
             respuesta = (
                 f"✅ **Premium Removido Exitosamente**\n\n"
                 f"👤 **Usuario ID:** `{target_user_id}`\n"
-                f"📛 **Nombre:** {usuario_info.get('first_name', 'N/A')} {usuario_info.get('last_name', '')}\n"
-                f"🔖 **Username:** @{usuario_info.get('username', 'N/A')}\n"
+                f"📛 **Nombre:** {nombre or 'N/A'}\n"
+                f"🔖 **Username:** @{username}\n"
                 f"🚫 **Estado:** Premium desactivado\n\n"
                 f"ℹ️ El usuario ha perdido sus beneficios premium."
             )
@@ -60,7 +138,7 @@ async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Notificar al usuario si es posible
             try:
                 await context.bot.send_message(
-                    chat_id=target_user_id,
+                    chat_id=int(target_user_id),
                     text="🚫 **Aviso Importante**\n\n"
                          "Tu suscripción premium ha sido removida.\n"
                          "Has perdido acceso a los beneficios premium.\n\n"
@@ -74,5 +152,12 @@ async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Error al remover el premium. Contacta al desarrollador.")
             
     except Exception as e:
-        logger.error(f"Error en comando remove: {e}")
+        logger.error(f"Error en comando remove: {e}", exc_info=True)
         await update.message.reply_text("❌ Error al procesar el comando. Verifica la sintaxis.")
+
+# =========================
+# ¡NO NECESITAS NADA MÁS!
+# El sistema automáticamente detectará la función remove()
+# y aplicará el decorador comando_con_licencia que incluye
+# la verificación de administradores
+# =========================

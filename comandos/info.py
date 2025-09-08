@@ -1,20 +1,96 @@
 # comandos/info.py
 import logging
+import sqlite3
+import os
 from typing import Any, Dict, Optional, Tuple, Union
 from datetime import datetime, timezone
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
-# Según tu proyecto
-from funcionamiento.licencias import usuario_tiene_licencia_activa
-import funcionamiento.usuarios as usuarios
-import funcionamiento.licencias as licencias
+# Configuración de la base de datos
+DB_PATH = 'database.db'
 
 logger = logging.getLogger(__name__)
 
 # =========================
-# Utilidades de reflexión
+# Conexión a la base de datos
+# =========================
+def get_db_connection():
+    """Establece conexión con la base de datos"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+# =========================
+# Funciones de base de datos (CORREGIDAS)
+# =========================
+def obtener_usuario_por_id(user_id: str) -> Optional[Dict[str, Any]]:
+    """Obtiene usuario por ID desde la base de datos"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM usuarios WHERE user_id = ?", (user_id,))
+        user = cursor.fetchone()
+        return dict(user) if user else None
+    except Exception as e:
+        logger.error(f"Error obteniendo usuario por ID {user_id}: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def obtener_usuario_por_username(username: str) -> Optional[Dict[str, Any]]:
+    """Obtiene usuario por username desde la base de datos"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM usuarios WHERE username = ?", (username,))
+        user = cursor.fetchone()
+        return dict(user) if user else None
+    except Exception as e:
+        logger.error(f"Error obteniendo usuario por username {username}: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def obtener_licencia_activa(user_id: str) -> Optional[Dict[str, Any]]:
+    """Obtiene la licencia activa de un usuario desde la base de datos"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM licencias WHERE user_id = ? AND activa = 1", (user_id,))
+        licencia = cursor.fetchone()
+        return dict(licencia) if licencia else None
+    except Exception as e:
+        logger.error(f"Error obteniendo licencia activa para usuario {user_id}: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def usuario_tiene_licencia_activa(user_id: str) -> bool:
+    """Verifica si un usuario tiene licencia activa"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) as count 
+            FROM licencias 
+            WHERE user_id = ? AND activa = 1 AND fecha_expiracion > datetime('now')
+        """, (user_id,))
+        result = cursor.fetchone()
+        return result['count'] > 0 if result else False
+    except Exception as e:
+        logger.error(f"Error verificando licencia activa para usuario {user_id}: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+# =========================
+# Utilidades de reflexión (simplificadas)
 # =========================
 def _safe_getattr(obj, name: str):
     fn = getattr(obj, name, None)
@@ -51,10 +127,11 @@ def _normalize_user_obj(obj: Any) -> Dict[str, Any]:
             "apellido": "last_name",
             "es_admin": "is_admin",
             "is_admin": "is_admin",
-            "fecha_registro": "created_at",
-            "created_at": "created_at",
-            "ultimo_acceso": "last_seen",
-            "last_seen": "last_seen",
+            "fecha_registro": "fecha_registro",
+            "created_at": "fecha_registro",
+            "ultimo_acceso": "ultima_vez_visto",
+            "last_seen": "ultima_vez_visto",
+            "premium_hasta": "premium_hasta"
         }
         out: Dict[str, Any] = {}
         for k, v in obj.items():
@@ -65,7 +142,6 @@ def _normalize_user_obj(obj: Any) -> Dict[str, Any]:
     if hasattr(obj, "__dict__"):
         return _normalize_user_obj(obj.__dict__.copy())
 
-    # Tuplas/listas no se pueden normalizar sin esquema
     return {}
 
 def _normalize_license_obj(obj: Any) -> Dict[str, Any]:
@@ -83,12 +159,18 @@ def _normalize_license_obj(obj: Any) -> Dict[str, Any]:
         obj = obj.__dict__.copy()
 
     if isinstance(obj, dict):
-        plan = obj.get("plan") or obj.get("tipo") or obj.get("nombre_plan") or obj.get("level") or obj.get("tier")
-        started = obj.get("started_at") or obj.get("fecha_inicio") or obj.get("inicio") or obj.get("created_at")
-        expires = obj.get("expires_at") or obj.get("expira_en") or obj.get("fecha_expiracion") or obj.get("expiration")
+        # Usar 'das' para determinar el plan (ej: 30 días = Plan Premium 30)
+        das = obj.get("das")
+        if das:
+            plan = f"Premium {das} días"
+        else:
+            plan = obj.get("plan") or obj.get("tipo") or "Premium"
+            
+        started = obj.get("started_at") or obj.get("fecha_activacion") or obj.get("fecha_sciivacion")
+        expires = obj.get("expires_at") or obj.get("fecha_expiracion")
 
         return {
-            "plan": str(plan) if plan is not None else None,
+            "plan": str(plan),
             "started_at": _parse_to_dt(started),
             "expires_at": _parse_to_dt(expires),
             "raw": obj,
@@ -115,7 +197,6 @@ def _parse_to_dt(value: Any) -> Optional[datetime]:
 
     # epoch
     if isinstance(value, (int, float)):
-        # heurística: si es muy grande, probablemente ms
         try:
             if value > 1e12:  # ms
                 return datetime.fromtimestamp(value / 1000.0, tz=timezone.utc)
@@ -132,7 +213,7 @@ def _parse_to_dt(value: Any) -> Optional[datetime]:
         except Exception:
             pass
 
-        # Formatos comunes
+        # Formatos comunes para SQLite
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S",
                     "%Y-%m-%d", "%Y/%m/%d", "%d/%m/%Y", "%d-%m-%Y"):
             try:
@@ -170,19 +251,11 @@ def _human_delta(to_dt: datetime, from_dt: Optional[datetime] = None) -> Tuple[s
 # Búsqueda de datos
 # =========================
 def _try_fetch_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
-    data = _call_first_available(
-        usuarios,
-        ("obtener_usuario_por_id", "get_usuario_por_id", "buscar_usuario_por_id"),
-        user_id,
-    )
+    data = obtener_usuario_por_id(user_id)
     return _normalize_user_obj(data) if data else None
 
 def _try_fetch_user_by_username(username: str) -> Optional[Dict[str, Any]]:
-    data = _call_first_available(
-        usuarios,
-        ("obtener_usuario_por_username", "get_usuario_por_username", "buscar_usuario_por_username"),
-        username,
-    )
+    data = obtener_usuario_por_username(username)
     return _normalize_user_obj(data) if data else None
 
 def _try_fetch_active_license(user_id: str) -> Optional[Dict[str, Any]]:
@@ -190,19 +263,10 @@ def _try_fetch_active_license(user_id: str) -> Optional[Dict[str, Any]]:
     Intenta varias funciones típicas de tu capa de licencias para traer
     la licencia activa (o la más reciente) del usuario.
     """
-    data = _call_first_available(
-        licencias,
-        (
-            "obtener_licencia_activa",
-            "get_licencia_activa",
-            "obtener_licencia_por_usuario",
-            "get_licencia_por_usuario",
-            "licencia_activa_de",
-        ),
-        user_id,
-    )
+    data = obtener_licencia_activa(user_id)
     if data:
         return _normalize_license_obj(data)
+    
     # Fallback: buscar premium_hasta en usuarios
     user_data = _try_fetch_user_by_id(user_id)
     if user_data and user_data.get("premium_hasta"):
@@ -220,6 +284,11 @@ def _try_fetch_active_license(user_id: str) -> Optional[Dict[str, Any]]:
 # =========================
 def _fmt_bool(v: Optional[bool]) -> str:
     return "Sí ✅" if v else "No ❌"
+
+def _fmt_date(dt: Optional[datetime]) -> str:
+    if not dt:
+        return "N/A"
+    return dt.strftime("%Y-%m-%d %H:%M UTC")
 
 def _build_info_msg(found_user: Dict[str, Any], target_id: Optional[str], target_username: Optional[str]) -> str:
     # ID y username a mostrar
@@ -265,13 +334,14 @@ def _build_info_msg(found_user: Dict[str, Any], target_id: Optional[str], target
         if nombre:
             lines.append(f"• Nombre: {nombre}")
 
+    # Campo is_admin puede no existir en tu tabla, lo omitimos si no está presente
     if found_user.get("is_admin") is not None:
         lines.append(f"• Admin: {_fmt_bool(bool(found_user.get('is_admin')))}")
 
-    if found_user.get("created_at"):
-        lines.append(f"• Registrado: {found_user.get('created_at')}")
-    if found_user.get("last_seen"):
-        lines.append(f"• Último acceso: {found_user.get('last_seen')}")
+    if found_user.get("fecha_registro"):
+        lines.append(f"• Registrado: {_fmt_date(_parse_to_dt(found_user.get('fecha_registro')))}")
+    if found_user.get("ultima_vez_visto"):
+        lines.append(f"• Último acceso: {_fmt_date(_parse_to_dt(found_user.get('ultima_vez_visto')))}")
 
     # Bloque de licencia detallada
     lines.append("—")
@@ -281,18 +351,16 @@ def _build_info_msg(found_user: Dict[str, Any], target_id: Optional[str], target
         if plan:
             lines.append(f"• Plan: *{plan}*")
         if started_at:
-            lines.append(f"• Inicio: {started_at.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+            lines.append(f"• Inicio: {_fmt_date(started_at)}")
         if expires_at:
             exp_txt, expired = _human_delta(expires_at)
-            lines.append(f"• Expira: {expires_at.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+            lines.append(f"• Expira: {_fmt_date(expires_at)}")
             lines.append(f"• Estado: {'Expirada ❌' if expired else 'Activa ✅'}")
-            lines.append(f"• Tiempo restante: {exp_txt.replace('restan ', '').replace('expirada hace ', '') if not expired else exp_txt}")
+            lines.append(f"• Tiempo: {exp_txt}")
         else:
-            # Si no hay expiración, mostramos booleano (si lo tenemos)
             if lic_text != "Desconocido":
                 lines.append(f"• Estado: {lic_text}")
     else:
-        # Sin detalle → estado booleano o mensaje
         lines.append(f"• Estado: {lic_text}")
 
     return "\n".join(lines)
@@ -357,3 +425,30 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error en comando info: {e}", exc_info=True)
         if update.message:
             await update.message.reply_text("⚠️ Ocurrió un error consultando la información.")
+
+# Función auxiliar para verificar la conexión
+def verificar_conexion_db():
+    """Verifica que la base de datos esté accesible"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = cursor.fetchall()
+        table_names = [table['name'] for table in tables]
+        logger.info(f"Tablas en la base de datos: {table_names}")
+        
+        # Verificar que existan las tablas necesarias
+        if 'usuarios' not in table_names:
+            logger.error("❌ La tabla 'usuarios' no existe en la base de datos")
+        if 'licencias' not in table_names:
+            logger.error("❌ La tabla 'licencias' no existe en la base de datos")
+            
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error conectando a la base de datos: {e}")
+        return False
+
+# Verificar conexión al importar
+if __name__ != "__main__":
+    verificar_conexion_db()
