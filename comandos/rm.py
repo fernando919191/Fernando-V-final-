@@ -3,7 +3,7 @@ import aiohttp
 import random
 import json
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, Application, CommandHandler
 
 logger = logging.getLogger(__name__)
 
@@ -201,3 +201,24 @@ def generar_codigo_postal(nombre_pais):
         'United Kingdom': lambda: f"{random.choice('ABCDEFGHIJKLMNOPRSTUWYZ')}{random.choice('ABCDEFGHKLMNOPQRSTUVWXY')}{random.randint(1,99)} {random.randint(1,99)}{random.choice('ABCDEFGHJKPMNW')}{random.choice('ABCDEFGHJKSTUW')}"),
     }
     return formatos.get(nombre_pais, lambda: str(random.randint(10000, 99999)))()
+
+# Función principal para configurar el bot
+def main():
+    # Configurar logging
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+    
+    # Reemplaza 'TU_TOKEN_AQUI' con el token de tu bot
+    APPLICATION = Application.builder().token('TU_TOKEN_AQUI').build()
+    
+    # Registrar el comando rm
+    APPLICATION.add_handler(CommandHandler("rm", rm))
+    
+    # Iniciar el bot
+    APPLICATION.run_polling()
+    print("Bot iniciado correctamente")
+
+if __name__ == '__main__':
+    main()
