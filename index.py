@@ -4,7 +4,7 @@ import importlib
 import logging
 from functools import wraps
 
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -310,6 +310,16 @@ def main():
         for nombre, funcion in comandos.items():
             application.add_handler(CommandHandler(nombre, funcion))
             logger.info(f"📝 Registrado comando: /{nombre}")
+
+        # Registrar callback handler para rmlist
+        try:
+            from comandos.rmlist import rmlist_callback
+            application.add_handler(CallbackQueryHandler(rmlist_callback, pattern="^rmlist_"))
+            logger.info("✅ Callback handler para rmlist registrado")
+        except ImportError as e:
+            logger.warning(f"⚠️ No se pudo cargar callback handler para rmlist: {e}")
+        except Exception as e:
+            logger.error(f"❌ Error registrando callback handler: {e}")
 
         # Cargar ConversationHandlers (si los hay)
         cargar_comandos_conversacion(application)
