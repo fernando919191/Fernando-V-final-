@@ -40,6 +40,28 @@ ADMINISTRADORES = {
 # Cache de comandos
 COMANDOS_CARGADOS = None
 
+# -------------------------
+# Configuración de permisos
+# -------------------------
+COMANDOS_SOLO_ADMIN = {
+    "addkeys",    # Agregar claves
+    "users",      # Listar usuarios  
+    "premium",    # Gestión premium
+    "remove",     # Remover premium
+    "info",
+    "genkey",              # Info de usuario (SOLO ADMIN)
+    # Agrega aquí más comandos solo para admins
+}
+
+COMANDOS_SIN_LICENCIA = {
+    "key",        # Canjear licencia
+    "start",      # Comando inicial
+    "help",       # Ayuda
+    "me",         # Información personal básica
+    "ping",       # Test de conexión
+    # Agrega aquí comandos públicos que no requieran licencia
+}
+
 
 def es_administrador(user_id: str, username: str | None = None) -> bool:
     """Verifica si un usuario es administrador."""
@@ -70,44 +92,30 @@ def comando_con_licencia(func):
             # Registrar usuario siempre
             registrar_usuario(user_id, username, first_name, last_name)
 
-            # Comandos permitidos sin licencia
-            comandos_permitidos_sin_licencia = {
-                "key",
-                "start",
-                "addkeys",
-                "help",
-                "users",
-                "me",
-                "ppconfig",
-                "premium",
-                "ping",
-            }
-
-            # Admins: sin verificación
+            # Admins: sin verificación de licencia
             if es_administrador(user_id, username):
                 return await func(update, context)
 
-            # Requiere licencia si no está en la lista blanca
-            if (
-                command_name not in comandos_permitidos_sin_licencia
-                and not usuario_tiene_licencia_activa(user_id)
-            ):
-                if update.message:
-                    await update.message.reply_text(
-                        "❌ No tienes una licencia activa.\n\n"
-                        "Usa /key <clave> para canjear una licencia.\n"
-                        "Contacta con un administrador si necesitas una clave."
-                    )
+            # Comandos que solo admins pueden usar
+            if command_name in COMANDOS_SOLO_ADMIN:
+                await update.message.reply_text("❌ No tienes permisos para usar este comando.")
                 return
 
-            # Verificaciones de permisos para comandos admin
-            comandos_admin = {"addkeys", "users", "premium"}
-            if command_name in comandos_admin and not es_administrador(user_id, username):
-                if update.message:
-                    await update.message.reply_text("❌ No tienes permisos para usar este comando.")
+            # Comandos que no requieren licencia
+            if command_name in COMANDOS_SIN_LICENCIA:
+                return await func(update, context)
+
+            # Comandos que requieren licencia
+            if not usuario_tiene_licencia_activa(user_id):
+                await update.message.reply_text(
+                    "❌ No tienes una licencia activa.\n\n"
+                    "Usa /key <clave> para canjear una licencia.\n"
+                    "Contacta con un administrador si necesitas una clave."
+                )
                 return
 
             return await func(update, context)
+
         except Exception as e:
             logger.error(f"❌ Error en wrapper de comando '{func.__name__}': {e}", exc_info=True)
 
@@ -241,6 +249,23 @@ async def manejar_todos_los_mensajes(update: Update, context: ContextTypes.DEFAU
             comandos_disponibles = COMANDOS_CARGADOS or cargar_comandos()
 
             if comando in comandos_disponibles:
+                # VERIFICAR PERMISOS PARA COMANDOS CON PUNTO
+                if not es_administrador(user_id, username):
+                    # Comandos que solo admins pueden usar
+                    if comando in COMANDOS_SOLO_ADMIN:
+                        await update.message.reply_text("❌ No tienes permisos para usar este comando.")
+                        return
+                    
+                    # Comandos que requieren licencia
+                    if (comando not in COMANDOS_SIN_LICENCIA and 
+                        not usuario_tiene_licencia_activa(user_id)):
+                        await update.message.reply_text(
+                            "❌ No tienes una licencia activa.\n\n"
+                            "Usa /key <clave> para canjear una licencia.\n"
+                            "Contacta con un administrador si necesitas una clave."
+                        )
+                        return
+                
                 logger.info(f"✅ Ejecutando comando: .{comando}")
                 context.args = args  # simular args para handlers
                 await comandos_disponibles[comando](update, context)
@@ -249,15 +274,8 @@ async def manejar_todos_los_mensajes(update: Update, context: ContextTypes.DEFAU
                 await update.message.reply_text(f"❌ Comando '.{comando}' no reconocido")
                 return
 
-        # Mensajes normales (no comando): exigir licencia a no-admins
-        if not es_administrador(user_id, username):
-            if not usuario_tiene_licencia_activa(user_id):
-                await update.message.reply_text(
-                    "❌ No tienes una licencia activa.\n\n"
-                    "Usa /key <clave> para canjear una licencia.\n"
-                    "Contacta con un administrador si necesitas una clave."
-                )
-                return
+        # MENSAJES NORMALES (NO COMANDOS): NO EXIGIR LICENCIA
+        # Los usuarios pueden chatear normalmente sin licencia
 
     except Exception as e:
         logger.error(f"❌ Error en manejar_todos_los_mensajes: {e}", exc_info=True)
@@ -306,6 +324,8 @@ def main():
 
         logger.info("🤖 Bot configurado correctamente")
         logger.info(f"👑 Administradores: {ADMINISTRADORES}")
+        logger.info(f"🔐 Comandos solo admin: {COMANDOS_SOLO_ADMIN}")
+        logger.info(f"🔓 Comandos sin licencia: {COMANDOS_SIN_LICENCIA}")
 
         lista = list(comandos.keys())
         logger.info("📋 Comandos disponibles /: " + ", ".join("/" + c for c in lista))
