@@ -1,6 +1,5 @@
-from telegram import Update
-from telegram.ext import ContextTypes
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, CallbackContext
 
 # Diccionario completo de países
 PAISES_COMPLETO = {
@@ -25,13 +24,20 @@ PAISES_COMPLETO = {
     'suiza': {'nombre': 'Suiza', 'codigo': '+41', 'bandera': '🇨🇭'},
 }
 
-async def rmlist(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
+async def rmlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando para mostrar la lista de países con botones de paginación"""
+    await show_rmlist_page(update, context, page=0)
+
+async def show_rmlist_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
+    """Muestra una página específica de la lista de países"""
     
     # Dividir la lista en páginas de 10 países cada una
     paises_list = list(PAISES_COMPLETO.items())
     items_per_page = 10
     total_pages = (len(paises_list) + items_per_page - 1) // items_per_page
+    
+    # Asegurar que la página esté dentro del rango válido
+    page = max(0, min(page, total_pages - 1))
     
     # Calcular el rango de países para esta página
     start_idx = page * items_per_page
@@ -57,13 +63,15 @@ async def rmlist(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int =
     if total_pages > 1:
         row = []
         if page > 0:
-            row.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"rmlist_page_{page-1}"))
+            row.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"rmlist_prev_{page}"))
+        
+        # Botón de página actual (solo para mostrar)
+        row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="rmlist_current"))
         
         if page < total_pages - 1:
-            row.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"rmlist_page_{page+1}"))
+            row.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"rmlist_next_{page}"))
         
-        if row:
-            keyboard.append(row)
+        keyboard.append(row)
     
     # Botón para cerrar
     keyboard.append([InlineKeyboardButton("❌ Cerrar Lista", callback_data="rmlist_close")])
@@ -72,11 +80,19 @@ async def rmlist(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int =
     
     # Enviar o editar el mensaje
     if update.callback_query:
-        await update.callback_query.edit_message_text(
-            html_message, 
-            parse_mode='HTML',
-            reply_markup=reply_markup
-        )
+        try:
+            await update.callback_query.edit_message_text(
+                html_message, 
+                parse_mode='HTML',
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            # Si hay error al editar, enviar nuevo mensaje
+            await update.callback_query.message.reply_text(
+                html_message,
+                parse_mode='HTML',
+                reply_markup=reply_markup
+            )
     else:
         await update.message.reply_text(
             html_message, 
@@ -84,7 +100,7 @@ async def rmlist(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int =
             reply_markup=reply_markup
         )
 
-async def rmlist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def rmlist_callback(update: Update, context: CallbackContext):
     """Maneja los callbacks de los botones de paginación"""
     query = update.callback_query
     await query.answer()
@@ -93,6 +109,12 @@ async def rmlist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data == "rmlist_close":
         await query.delete_message()
-    elif data.startswith("rmlist_page_"):
-        page = int(data.split("_")[2])
-        await rmlist(update, context, page)
+    elif data == "rmlist_current":
+        # No hacer nada para el botón de página actual
+        pass
+    elif data.startswith("rmlist_prev_"):
+        current_page = int(data.split("_")[2])
+        await show_rmlist_page(update, context, page=current_page - 1)
+    elif data.startswith("rmlist_next_"):
+        current_page = int(data.split("_")[2])
+        await show_rmlist_page(update, context, page=current_page + 1)
