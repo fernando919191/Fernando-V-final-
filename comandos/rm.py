@@ -1,9 +1,8 @@
 import logging
 import aiohttp
+import random
 from telegram import Update
 from telegram.ext import ContextTypes
-from funcionamiento.usuarios import obtener_usuario_por_id
-from index import es_administrador
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +32,6 @@ PAISES = {
 async def rm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando para generar datos de un país específico"""
     try:
-        user_id = str(update.effective_user.id)
-        username = update.effective_user.username
-        
         if not context.args:
             # Mostrar lista de países disponibles
             lista_paises = "\n".join([f"• {codigo} - {info['nombre']}" for codigo, info in PAISES.items()])
@@ -59,7 +55,7 @@ async def rm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Obtener datos del país
         pais_info = PAISES[pais_code]
-        datos = await obtener_datos_pais(pais_code)
+        datos = await obtener_datos_reales_pais(pais_info['nombre'])
         
         if not datos:
             await update.message.reply_text(
@@ -71,12 +67,12 @@ async def rm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Construir respuesta formateada con datos copiables
         respuesta = (
             f"🌍 **Datos de {pais_info['nombre']}**\n\n"
-            f"🏢 **Street:** `{datos['street']}`\n"
-            f"🏙️ **State:** `{datos['state']}`\n"
-            f"📮 **CP:** `{datos['postcode']}`\n"
+            f"🏢 **Street:** `{datos['calle']}`\n"
+            f"🏙️ **State:** `{datos['estado']}`\n"
+            f"📮 **CP:** `{datos['codigo_postal']}`\n"
             f"📞 **Code:** `{pais_info['codigo']}`\n"
             f"🇺🇳 **Country:** `{pais_info['nombre']}`\n\n"
-            f"👤 **By:** {update.effective_user.first_name} [`{user_id}`]"
+            f"👤 **By:** {update.effective_user.first_name} [`{update.effective_user.id}`]"
         )
         
         await update.message.reply_text(respuesta, parse_mode='Markdown')
@@ -85,61 +81,89 @@ async def rm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error en comando rm: {e}")
         await update.message.reply_text("❌ Error al procesar el comando.")
 
-async def obtener_datos_pais(codigo_pais):
-    """Obtiene datos aleatorios de una API para el país especificado"""
+async def obtener_datos_reales_pais(nombre_pais):
+    """Obtiene datos REALES y NUEVOS usando APIs de geolocalización"""
     try:
+        # API 1: Nominatim (OpenStreetMap) - Datos reales de ubicaciones
         async with aiohttp.ClientSession() as session:
-            # API de RandomUser
-            url = f"https://randomuser.me/api/?nat={codigo_pais}"
+            # Buscar ubicaciones reales en el país
+            url = f"https://nominatim.openstreetmap.org/search?country={nombre_pais}&format=json&limit=10"
             
-            async with session.get(url, timeout=10) as response:
+            async with session.get(url, headers={'User-Agent': 'TelegramBot'}) as response:
                 if response.status == 200:
-                    data = await response.json()
-                    if data['results']:
-                        user = data['results'][0]
-                        location = user['location']
+                    locations = await response.json()
+                    if locations:
+                        # Elegir una ubicación aleatoria
+                        location = random.choice(locations)
                         
                         return {
-                            'street': f"{location['street']['name']} {location['street']['number']}",
-                            'state': location['state'],
-                            'postcode': str(location['postcode']),
-                            'city': location['city']
+                            'calle': location.get('display_name', '').split(',')[0] if location.get('display_name') else f"Calle {random.randint(1, 1000)}",
+                            'estado': location.get('state', 'Estado'),
+                            'ciudad': location.get('city', 'Ciudad'),
+                            'codigo_postal': location.get('postcode', str(random.randint(10000, 99999))) if location.get('postcode') else str(random.randint(10000, 99999))
                         }
+        
+        # API 2: Geoapify - Datos más precisos
+        async with aiohttp.ClientSession() as session:
+            url = f"https://api.geoapify.com/v1/geocode/search?text={nombre_pais}&format=json&apiKey=84d3b566a45949b591450c66bc7e99db"
+            # Nota: Necesitarías obtener una API key gratis de geoapify.com
             
-            # Si falla, usar datos predefinidos
-            return datos_predefinidos_pais(codigo_pais)
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get('results'):
+                        result = random.choice(data['results'])
+                        return {
+                            'calle': result.get('street', f"Calle {random.randint(1, 1000)}"),
+                            'estado': result.get('state', 'Estado'),
+                            'ciudad': result.get('city', 'Ciudad'),
+                            'codigo_postal': result.get('postcode', str(random.randint(10000, 99999)))
+                        }
+        
+        # Si las APIs fallan, generar datos realistas
+        return generar_datos_realistas(nombre_pais)
             
-    except Exception:
-        # Fallback a datos predefinidos en caso de error
-        return datos_predefinidos_pais(codigo_pais)
+    except Exception as e:
+        logger.error(f"Error obteniendo datos reales: {e}")
+        return generar_datos_realistas(nombre_pais)
 
-def datos_predefinidos_pais(codigo_pais):
-    """Datos predefinidos para cuando la API falle"""
-    pais_info = PAISES.get(codigo_pais, {'nombre': 'País', 'codigo': '+00'})
-    
-    datos_base = {
-        'street': "Calle Principal 123",
-        'state': "Estado",
-        'postcode': "12345",
-        'city': "Ciudad Capital"
+def generar_datos_realistas(nombre_pais):
+    """Genera datos realistas basados en el país"""
+    # Datos realistas por país
+    datos_pais = {
+        'México': {
+            'calles': ['Avenida Reforma', 'Insurgentes Sur', 'Calzada de Tlalpan', 'Paseo de la Reforma', 'Eje Central'],
+            'estados': ['CDMX', 'Estado de México', 'Jalisco', 'Nuevo León', 'Puebla'],
+            'cps': ['06500', '06600', '44100', '64000', '72000']
+        },
+        'Colombia': {
+            'calles': ['Carrera 7', 'Calle 72', 'Avenida Boyacá', 'Carrera 15', 'Calle 100'],
+            'estados': ['Bogotá', 'Antioquia', 'Valle del Cauca', 'Cundinamarca', 'Atlántico'],
+            'cps': ['110321', '050001', '760001', '080001', '440001']
+        },
+        'Estados Unidos': {
+            'calles': ['Main Street', 'Broadway', '5th Avenue', 'Sunset Boulevard', 'Michigan Avenue'],
+            'estados': ['California', 'New York', 'Texas', 'Florida', 'Illinois'],
+            'cps': ['90210', '10001', '77001', '33101', '60601']
+        },
+        'España': {
+            'calles': ['Gran Vía', 'Paseo de Gracia', 'Calle Alcalá', 'Calle Preciados', 'Rambla'],
+            'estados': ['Madrid', 'Barcelona', 'Valencia', 'Sevilla', 'Bilbao'],
+            'cps': ['28001', '08001', '46001', '41001', '48001']
+        }
     }
     
-    # Personalizar por país
-    personalizaciones = {
-        'mx': {'street': "Avenida Reforma 456", 'state': "CDMX", 'postcode': "06500", 'city': "Ciudad de México"},
-        'us': {'street': "Broadway 789", 'state': "NY", 'postcode': "10001", 'city': "New York"},
-        'es': {'street': "Gran Vía 101", 'state': "Madrid", 'postcode': "28013", 'city': "Madrid"},
-        'arg': {'street': "Avenida 9 de Julio 1000", 'state': "CABA", 'postcode': "C1073", 'city': "Buenos Aires"},
-        'col': {'street': "Carrera 7 #71-52", 'state': "Bogotá", 'postcode': "110321", 'city': "Bogotá"},
-        'ven': {'street': "Avenida Bolívar 123", 'state': "Caracas", 'postcode': "1010", 'city': "Caracas"},
-        'br': {'street': "Avenida Paulista 1000", 'state': "SP", 'postcode': "01310", 'city': "São Paulo"},
-        'chi': {'street': "Avenida Providencia 1234", 'state': "RM", 'postcode': "750000", 'city': "Santiago"},
-        'fr': {'street': "Champs-Élysées 56", 'state': "Île-de-France", 'postcode': "75008", 'city': "Paris"},
-        'uk': {'street': "Oxford Street 123", 'state': "London", 'postcode': "W1D 1BS", 'city': "London"},
-        'jap': {'street': "Shibuya Crossing 1", 'state': "Tokyo", 'postcode': "150-0043", 'city': "Tokyo"}
+    # Datos por defecto si el país no está en la lista
+    datos_default = {
+        'calles': [f"Calle {random.randint(1, 100)}", f"Avenida {random.randint(1, 100)}"],
+        'estados': ['Estado Principal', 'Región Central'],
+        'cps': [str(random.randint(10000, 99999))]
     }
     
-    if codigo_pais in personalizaciones:
-        datos_base.update(personalizaciones[codigo_pais])
+    pais_data = datos_pais.get(nombre_pais, datos_default)
     
-    return datos_base
+    return {
+        'calle': f"{random.choice(pais_data['calles'])} {random.randint(1, 1000)}",
+        'estado': random.choice(pais_data['estados']),
+        'codigo_postal': random.choice(pais_data['cps'])
+    }
