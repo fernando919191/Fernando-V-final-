@@ -7,13 +7,27 @@ from index import es_administrador
 
 logger = logging.getLogger(__name__)
 
-# Mapeo de códigos de país a nombres completos
+# Mapeo de códigos de país a nombres completos y códigos telefónicos
 PAISES = {
-    'mx': 'México', 'col': 'Colombia', 'ven': 'Venezuela', 'us': 'Estados Unidos',
-    'uk': 'Reino Unido', 'ca': 'Canadá', 'rus': 'Rusia', 'jap': 'Japón',
-    'chi': 'China', 'hon': 'Honduras', 'chile': 'Chile', 'arg': 'Argentina',
-    'ind': 'India', 'br': 'Brasil', 'peru': 'Perú', 'es': 'España',
-    'italia': 'Italia', 'fran': 'Francia', 'suiza': 'Suiza'
+    'mx': {'nombre': 'México', 'codigo': '+52'},
+    'col': {'nombre': 'Colombia', 'codigo': '+57'},
+    'ven': {'nombre': 'Venezuela', 'codigo': '+58'},
+    'us': {'nombre': 'Estados Unidos', 'codigo': '+1'},
+    'uk': {'nombre': 'Reino Unido', 'codigo': '+44'},
+    'ca': {'nombre': 'Canadá', 'codigo': '+1'},
+    'rus': {'nombre': 'Rusia', 'codigo': '+7'},
+    'jap': {'nombre': 'Japón', 'codigo': '+81'},
+    'chi': {'nombre': 'China', 'codigo': '+86'},
+    'hon': {'nombre': 'Honduras', 'codigo': '+504'},
+    'chile': {'nombre': 'Chile', 'codigo': '+56'},
+    'arg': {'nombre': 'Argentina', 'codigo': '+54'},
+    'ind': {'nombre': 'India', 'codigo': '+91'},
+    'br': {'nombre': 'Brasil', 'codigo': '+55'},
+    'peru': {'nombre': 'Perú', 'codigo': '+51'},
+    'es': {'nombre': 'España', 'codigo': '+34'},
+    'italia': {'nombre': 'Italia', 'codigo': '+39'},
+    'fran': {'nombre': 'Francia', 'codigo': '+33'},
+    'suiza': {'nombre': 'Suiza', 'codigo': '+41'}
 }
 
 async def rm(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -24,7 +38,7 @@ async def rm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if not context.args:
             # Mostrar lista de países disponibles
-            lista_paises = "\n".join([f"• {codigo} - {nombre}" for codigo, nombre in PAISES.items()])
+            lista_paises = "\n".join([f"• {codigo} - {info['nombre']}" for codigo, info in PAISES.items()])
             await update.message.reply_text(
                 f"🌍 *Comando RM - Generador de Datos*\n\n"
                 f"📝 Uso: `.rm <código_país>`\n\n"
@@ -44,25 +58,25 @@ async def rm(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Obtener datos del país
-        pais_nombre = PAISES[pais_code]
+        pais_info = PAISES[pais_code]
         datos = await obtener_datos_pais(pais_code)
         
         if not datos:
             await update.message.reply_text(
-                f"❌ No se pudieron obtener datos para {pais_nombre}.\n"
+                f"❌ No se pudieron obtener datos para {pais_info['nombre']}.\n"
                 "Intenta nuevamente más tarde."
             )
             return
         
-        # Construir respuesta formateada
+        # Construir respuesta formateada con datos copiables
         respuesta = (
-            f"🌍 **Datos de {pais_nombre}**\n\n"
-            f"🏢 **Street:** {datos['street']}\n"
-            f"🏙️ **State:** {datos['state']}\n"
-            f"📮 **CP:** {datos['postcode']}\n"
-            f"🔢 **Number:** {datos['number']}\n"
-            f"🇺🇳 **Country:** {pais_nombre}\n\n"
-            f"👤 **By:** {update.effective_user.first_name} [{user_id}]"
+            f"🌍 **Datos de {pais_info['nombre']}**\n\n"
+            f"🏢 **Street:** `{datos['street']}`\n"
+            f"🏙️ **State:** `{datos['state']}`\n"
+            f"📮 **CP:** `{datos['postcode']}`\n"
+            f"📞 **Code:** `{pais_info['codigo']}`\n"
+            f"🇺🇳 **Country:** `{pais_info['nombre']}`\n\n"
+            f"👤 **By:** {update.effective_user.first_name} [`{user_id}`]"
         )
         
         await update.message.reply_text(respuesta, parse_mode='Markdown')
@@ -75,7 +89,7 @@ async def obtener_datos_pais(codigo_pais):
     """Obtiene datos aleatorios de una API para el país especificado"""
     try:
         async with aiohttp.ClientSession() as session:
-            # API 1: RandomUser API (funciona para muchos países)
+            # API de RandomUser
             url = f"https://randomuser.me/api/?nat={codigo_pais}"
             
             async with session.get(url, timeout=10) as response:
@@ -89,51 +103,40 @@ async def obtener_datos_pais(codigo_pais):
                             'street': f"{location['street']['name']} {location['street']['number']}",
                             'state': location['state'],
                             'postcode': str(location['postcode']),
-                            'number': location['street']['number'],
-                            'city': location['city'],
-                            'country': location['country']
+                            'city': location['city']
                         }
             
-            # Si la primera API falla, intentar con API alternativa
-            url_alt = "https://random-data-api.com/api/address/random_address"
-            async with session.get(url_alt, timeout=10) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return {
-                        'street': data['street_address'],
-                        'state': data['state'],
-                        'postcode': data['zip_code'],
-                        'number': data['building_number'],
-                        'city': data['city'],
-                        'country': data['country']
-                    }
+            # Si falla, usar datos predefinidos
+            return datos_predefinidos_pais(codigo_pais)
             
-            return None
-            
-    except Exception as e:
-        logger.error(f"Error obteniendo datos de país {codigo_pais}: {e}")
-        return None
+    except Exception:
+        # Fallback a datos predefinidos en caso de error
+        return datos_predefinidos_pais(codigo_pais)
 
-# Función alternativa para países específicos con datos predefinidos
 def datos_predefinidos_pais(codigo_pais):
     """Datos predefinidos para cuando la API falle"""
+    pais_info = PAISES.get(codigo_pais, {'nombre': 'País', 'codigo': '+00'})
+    
     datos_base = {
         'street': "Calle Principal 123",
         'state': "Estado",
         'postcode': "12345",
-        'number': "123",
-        'city': "Ciudad Capital",
-        'country': PAISES.get(codigo_pais, "País")
+        'city': "Ciudad Capital"
     }
     
     # Personalizar por país
     personalizaciones = {
-        'mx': {'postcode': "06700", 'state': "Ciudad de México"},
-        'us': {'postcode': "10001", 'state': "New York"},
-        'es': {'postcode': "28001", 'state': "Madrid"},
-        'arg': {'postcode': "C1002", 'state': "Buenos Aires"},
-        'col': {'postcode': "110011", 'state': "Bogotá"},
-        'ven': {'postcode': "1010", 'state': "Caracas"}
+        'mx': {'street': "Avenida Reforma 456", 'state': "CDMX", 'postcode': "06500", 'city': "Ciudad de México"},
+        'us': {'street': "Broadway 789", 'state': "NY", 'postcode': "10001", 'city': "New York"},
+        'es': {'street': "Gran Vía 101", 'state': "Madrid", 'postcode': "28013", 'city': "Madrid"},
+        'arg': {'street': "Avenida 9 de Julio 1000", 'state': "CABA", 'postcode': "C1073", 'city': "Buenos Aires"},
+        'col': {'street': "Carrera 7 #71-52", 'state': "Bogotá", 'postcode': "110321", 'city': "Bogotá"},
+        'ven': {'street': "Avenida Bolívar 123", 'state': "Caracas", 'postcode': "1010", 'city': "Caracas"},
+        'br': {'street': "Avenida Paulista 1000", 'state': "SP", 'postcode': "01310", 'city': "São Paulo"},
+        'chi': {'street': "Avenida Providencia 1234", 'state': "RM", 'postcode': "750000", 'city': "Santiago"},
+        'fr': {'street': "Champs-Élysées 56", 'state': "Île-de-France", 'postcode': "75008", 'city': "Paris"},
+        'uk': {'street': "Oxford Street 123", 'state': "London", 'postcode': "W1D 1BS", 'city': "London"},
+        'jap': {'street': "Shibuya Crossing 1", 'state': "Tokyo", 'postcode': "150-0043", 'city': "Tokyo"}
     }
     
     if codigo_pais in personalizaciones:
