@@ -1,60 +1,98 @@
 from telegram import Update
 from telegram.ext import ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-async def rmlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando para mostrar la lista de países en formato HTML"""
+# Diccionario completo de países
+PAISES_COMPLETO = {
+    'mx': {'nombre': 'México', 'codigo': '+52', 'bandera': '🇲🇽'},
+    'col': {'nombre': 'Colombia', 'codigo': '+57', 'bandera': '🇨🇴'},
+    'ven': {'nombre': 'Venezuela', 'codigo': '+58', 'bandera': '🇻🇪'},
+    'us': {'nombre': 'Estados Unidos', 'codigo': '+1', 'bandera': '🇺🇸'},
+    'uk': {'nombre': 'Reino Unido', 'codigo': '+44', 'bandera': '🇬🇧'},
+    'ca': {'nombre': 'Canadá', 'codigo': '+1', 'bandera': '🇨🇦'},
+    'rus': {'nombre': 'Rusia', 'codigo': '+7', 'bandera': '🇷🇺'},
+    'jap': {'nombre': 'Japón', 'codigo': '+81', 'bandera': '🇯🇵'},
+    'chi': {'nombre': 'China', 'codigo': '+86', 'bandera': '🇨🇳'},
+    'hon': {'nombre': 'Honduras', 'codigo': '+504', 'bandera': '🇭🇳'},
+    'chile': {'nombre': 'Chile', 'codigo': '+56', 'bandera': '🇨🇱'},
+    'arg': {'nombre': 'Argentina', 'codigo': '+54', 'bandera': '🇦🇷'},
+    'ind': {'nombre': 'India', 'codigo': '+91', 'bandera': '🇮🇳'},
+    'br': {'nombre': 'Brasil', 'codigo': '+55', 'bandera': '🇧🇷'},
+    'peru': {'nombre': 'Perú', 'codigo': '+51', 'bandera': '🇵🇪'},
+    'es': {'nombre': 'España', 'codigo': '+34', 'bandera': '🇪🇸'},
+    'italia': {'nombre': 'Italia', 'codigo': '+39', 'bandera': '🇮🇹'},
+    'fran': {'nombre': 'Francia', 'codigo': '+33', 'bandera': '🇫🇷'},
+    'suiza': {'nombre': 'Suiza', 'codigo': '+41', 'bandera': '🇨🇭'},
+}
+
+async def rmlist(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
+    """Comando para mostrar la lista de países con botones de paginación"""
     
-    PAISES = {
-        'mx': {'nombre': 'México', 'codigo': '+52', 'bandera': '🇲🇽'},
-        'col': {'nombre': 'Colombia', 'codigo': '+57', 'bandera': '🇨🇴'},
-        'ven': {'nombre': 'Venezuela', 'codigo': '+58', 'bandera': '🇻🇪'},
-        'us': {'nombre': 'Estados Unidos', 'codigo': '+1', 'bandera': '🇺🇸'},
-        'uk': {'nombre': 'Reino Unido', 'codigo': '+44', 'bandera': '🇬🇧'},
-        'ca': {'nombre': 'Canadá', 'codigo': '+1', 'bandera': '🇨🇦'},
-        'rus': {'nombre': 'Rusia', 'codigo': '+7', 'bandera': '🇷🇺'},
-        'jap': {'nombre': 'Japón', 'codigo': '+81', 'bandera': '🇯🇵'},
-        'chi': {'nombre': 'China', 'codigo': '+86', 'bandera': '🇨🇳'},
-        'hon': {'nombre': 'Honduras', 'codigo': '+504', 'bandera': '🇭🇳'},
-        'chile': {'nombre': 'Chile', 'codigo': '+56', 'bandera': '🇨🇱'},
-        'arg': {'nombre': 'Argentina', 'codigo': '+54', 'bandera': '🇦🇷'},
-        'ind': {'nombre': 'India', 'codigo': '+91', 'bandera': '🇮🇳'},
-        'br': {'nombre': 'Brasil', 'codigo': '+55', 'bandera': '🇧🇷'},
-        'peru': {'nombre': 'Perú', 'codigo': '+51', 'bandera': '🇵🇪'},
-        'es': {'nombre': 'España', 'codigo': '+34', 'bandera': '🇪🇸'},
-        'italia': {'nombre': 'Italia', 'codigo': '+39', 'bandera': '🇮🇹'},
-        'fran': {'nombre': 'Francia', 'codigo': '+33', 'bandera': '🇫🇷'},
-        'suiza': {'nombre': 'Suiza', 'codigo': '+41', 'bandera': '🇨🇭'},
-    }
+    # Dividir la lista en páginas de 10 países cada una
+    paises_list = list(PAISES_COMPLETO.items())
+    items_per_page = 10
+    total_pages = (len(paises_list) + items_per_page - 1) // items_per_page
     
-    # Crear lista en formato HTML
-    html_lista = "<b>🌍 LISTA DE PAÍSES DISPONIBLES</b>\n\n"
-    html_lista += "<b>📋 CÓDIGOS VÁLIDOS:</b>\n\n"
+    # Calcular el rango de países para esta página
+    start_idx = page * items_per_page
+    end_idx = min(start_idx + items_per_page, len(paises_list))
     
-    # Organizar en columnas para mejor visualización
-    paises_items = list(PAISES.items())
-    mitad = len(paises_items) // 2 + len(paises_items) % 2
+    # Crear el mensaje HTML
+    html_message = f"<b>🌍 LISTA DE PAÍSES DISPONIBLES</b>\n\n"
+    html_message += f"<b>📋 Página {page + 1} de {total_pages}</b>\n\n"
     
-    for i in range(mitad):
-        linea = ""
-        # Primera columna
-        if i < len(paises_items):
-            codigo1, info1 = paises_items[i]
-            linea += f"<b>{info1['bandera']} {codigo1}</b> - {info1['nombre']}"
+    # Agregar países de la página actual
+    for i in range(start_idx, end_idx):
+        codigo, info = paises_list[i]
+        html_message += f"{info['bandera']} <code>{codigo}</code> - {info['nombre']}\n"
+    
+    html_message += f"\n<b>💡 Mostrando {end_idx - start_idx} de {len(paises_list)} países</b>\n\n"
+    html_message += "<b>📍 USO:</b> <code>/rm codigo_pais</code>\n"
+    html_message += "<b>📍 EJEMPLO:</b> <code>/rm mx</code> para México\n"
+    html_message += "<b>📍 EJEMPLO:</b> <code>/rm us</code> para USA\n"
+    
+    # Crear botones de paginación
+    keyboard = []
+    
+    if total_pages > 1:
+        row = []
+        if page > 0:
+            row.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"rmlist_page_{page-1}"))
         
-        # Segunda columna (si existe)
-        if i + mitad < len(paises_items):
-            codigo2, info2 = paises_items[i + mitad]
-            # Añadir espacios para alinear
-            espacios = " " * (12 - len(codigo1) - len(info1['nombre']))
-            linea += f"{espacios}<b>{info2['bandera']} {codigo2}</b> - {info2['nombre']}"
+        if page < total_pages - 1:
+            row.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"rmlist_page_{page+1}"))
         
-        html_lista += linea + "\n"
+        if row:
+            keyboard.append(row)
     
-    html_lista += "\n<b>💡 EJEMPLOS DE USO:</b>\n"
-    html_lista += "• <code>/rm mx</code> - Dirección en México 🇲🇽\n"
-    html_lista += "• <code>/rm us</code> - Dirección en USA 🇺🇸\n"
-    html_lista += "• <code>/rm suiza</code> - Dirección en Suiza 🇨🇭\n"
-    html_lista += "• <code>/rm es</code> - Dirección en España 🇪🇸\n\n"
-    html_lista += "<b>📍 NOTA:</b> Usa los códigos entre comillas simples"
+    # Botón para cerrar
+    keyboard.append([InlineKeyboardButton("❌ Cerrar Lista", callback_data="rmlist_close")])
     
-    await update.message.reply_text(html_lista, parse_mode='HTML')
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Enviar o editar el mensaje
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            html_message, 
+            parse_mode='HTML',
+            reply_markup=reply_markup
+        )
+    else:
+        await update.message.reply_text(
+            html_message, 
+            parse_mode='HTML',
+            reply_markup=reply_markup
+        )
+
+async def rmlist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja los callbacks de los botones de paginación"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    
+    if data == "rmlist_close":
+        await query.delete_message()
+    elif data.startswith("rmlist_page_"):
+        page = int(data.split("_")[2])
+        await rmlist(update, context, page)
