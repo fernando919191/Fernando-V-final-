@@ -54,7 +54,7 @@ async def rm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if pais_code not in PAISES:
         await update.message.reply_text(
             "❌ Código de país no válido.\n"
-            "Usa /rm sin argumentos para ver la lista de países disponibles."
+            "Usa /rmlist sin argumentos para ver la lista de países disponibles."
         )
         return
     
