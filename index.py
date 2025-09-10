@@ -313,8 +313,8 @@ def main():
 
         # Registrar callback handler para tmp
         try:
-            from comandos.tmp import tmp_callback
-            application.add_handler(CallbackQueryHandler(tmp_callback, pattern="^tmp_"))
+            from comandos.tmp import handle_callback
+            application.add_handler(CallbackQueryHandler(handle_callback, pattern="^tmp_"))
             logger.info("✅ Callback handler para tmp registrado")
         except ImportError as e:
             logger.warning(f"⚠️ No se pudo cargar callback handler para tmp: {e}")
