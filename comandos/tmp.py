@@ -1,10 +1,13 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import ContextTypes
 import aiohttp
 import asyncio
 import random
 import string
 from datetime import datetime, timedelta
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Diccionario para almacenar correos por usuario
 user_emails = {}
@@ -57,10 +60,11 @@ async def tmp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'messages': [],
             'last_check': datetime.now(),
             'active': True,
-            'message_count': 0
+            'message_count': 0,
+            'chat_id': update.effective_chat.id
         }
         
-        # Mensaje con botones CORREGIDOS
+        # Mensaje con botones
         keyboard = [
             [InlineKeyboardButton("🔄 Refrescar", callback_data="refresh")],
             [InlineKeyboardButton("📧 Ver Mensajes", callback_data="view_messages")],
@@ -80,17 +84,14 @@ async def tmp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
         
-        # Guardar ID del mensaje para editar después
-        user_emails[user_id]['message_id'] = message.message_id
-        
         # Iniciar monitoreo en segundo plano
-        asyncio.create_task(monitor_emails(user_id, update, context))
+        asyncio.create_task(monitor_emails(user_id, context))
         
     except Exception as e:
         await update.message.reply_text("❌ Error al crear el correo temporal. Intenta nuevamente.")
-        print(f"Error en tmp: {e}")
+        logger.error(f"Error en tmp: {e}")
 
-async def monitor_emails(user_id: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def monitor_emails(user_id: str, context: ContextTypes.DEFAULT_TYPE):
     """Monitorea los correos entrantes en segundo plano"""
     while user_id in user_emails and user_emails[user_id]['active']:
         try:
@@ -100,7 +101,10 @@ async def monitor_emails(user_id: str, update: Update, context: ContextTypes.DEF
             time_elapsed = datetime.now() - email_info['created_time']
             if time_elapsed > timedelta(minutes=10):
                 if user_id in user_emails:
-                    await context.bot.send_message(chat_id=update.effective_chat.id, text="⏰ El correo temporal ha expirado (10 minutos).")
+                    await context.bot.send_message(
+                        chat_id=email_info['chat_id'], 
+                        text="⏰ El correo temporal ha expirado (10 minutos)."
+                    )
                     del user_emails[user_id]
                 break
             
@@ -117,13 +121,13 @@ async def monitor_emails(user_id: str, update: Update, context: ContextTypes.DEF
                     email_info['message_count'] += len(really_new_messages)
                     
                     for msg in really_new_messages:
-                        await notify_new_email(user_id, msg, update, context)
+                        await notify_new_email(user_id, msg, context)
             
             # Esperar 30 segundos entre checks
             await asyncio.sleep(30)
             
         except Exception as e:
-            print(f"Error en monitor_emails: {e}")
+            logger.error(f"Error en monitor_emails: {e}")
             break
 
 async def check_emails(login: str, domain: str):
@@ -135,15 +139,14 @@ async def check_emails(login: str, domain: str):
             async with session.get(url) as response:
                 if response.status == 200:
                     messages = await response.json()
-                    return messages
-                else:
-                    return []
+                    return messages if isinstance(messages, list) else []
+                return []
                     
     except Exception as e:
-        print(f"Error checking emails: {e}")
+        logger.error(f"Error checking emails: {e}")
         return []
 
-async def notify_new_email(user_id: str, email_data: dict, update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def notify_new_email(user_id: str, email_data: dict, context: ContextTypes.DEFAULT_TYPE):
     """Notifica sobre un nuevo correo recibido"""
     try:
         email_info = user_emails[user_id]
@@ -179,14 +182,14 @@ async def notify_new_email(user_id: str, email_data: dict, update: Update, conte
             )
             
             await context.bot.send_message(
-                chat_id=update.effective_chat.id,
+                chat_id=email_info['chat_id'],
                 text=message_text,
                 parse_mode='Markdown',
                 reply_markup=reply_markup
             )
             
     except Exception as e:
-        print(f"Error notifying email: {e}")
+        logger.error(f"Error notifying email: {e}")
 
 async def get_email_content(login: str, domain: str, message_id: int):
     """Obtiene el contenido completo de un mensaje"""
@@ -197,11 +200,10 @@ async def get_email_content(login: str, domain: str, message_id: int):
             async with session.get(url) as response:
                 if response.status == 200:
                     return await response.json()
-                else:
-                    return None
+                return None
                     
     except Exception as e:
-        print(f"Error getting email content: {e}")
+        logger.error(f"Error getting email content: {e}")
         return None
 
 async def tmp_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -223,7 +225,7 @@ async def tmp_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
             email_info['messages'].extend(really_new_messages)
             email_info['message_count'] += len(really_new_messages)
             for msg in really_new_messages:
-                await notify_new_email(user_id, msg, update, context)
+                await notify_new_email(user_id, msg, context)
             await update.message.reply_text(f"✅ {len(really_new_messages)} nuevo(s) mensaje(s)")
         else:
             await update.message.reply_text("🔄 No hay nuevos mensajes.")
@@ -349,32 +351,40 @@ async def tmp_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ No tienes un correo temporal activo.")
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja los callbacks de los botones - CORREGIDO"""
+    """Maneja los callbacks de los botones - ADAPTADO PARA TU ESTRUCTURA"""
     query = update.callback_query
     await query.answer()
     
     user_id = str(query.from_user.id)
     data = query.data
     
-    # Crear un update simulado para los comandos
-    fake_update = Update(update.update_id, query)
+    logger.info(f"Callback recibido: {data} de usuario {user_id}")
     
     if data == "refresh":
+        # Simular un update para tmp_refresh
+        fake_update = Update(update.update_id, message=query.message)
         await tmp_refresh(fake_update, context)
         
     elif data == "view_messages":
+        # Simular un update para tmp_messages
+        fake_update = Update(update.update_id, message=query.message)
         await tmp_messages(fake_update, context)
         
     elif data == "stop":
+        # Simular un update para tmp_stop
+        fake_update = Update(update.update_id, message=query.message)
         await tmp_stop(fake_update, context)
         
     elif data.startswith("read_"):
         try:
             message_id = data.split("_")[1]
+            # Simular un update para tmp_read con argumentos
+            fake_update = Update(update.update_id, message=query.message)
             context.args = [message_id]
             await tmp_read(fake_update, context)
         except Exception as e:
             await query.edit_message_text("❌ Error al leer el mensaje.")
+            logger.error(f"Error en callback read: {e}")
             
     elif data.startswith("delete_"):
         try:
@@ -388,15 +398,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text("🗑️ Mensaje eliminado de la lista.")
             else:
                 await query.edit_message_text("❌ No tienes correo activo.")
-        except:
+        except Exception as e:
             await query.edit_message_text("❌ Error al eliminar el mensaje.")
+            logger.error(f"Error en callback delete: {e}")
 
-# Configuración de handlers
-def setup_handlers(application):
-    application.add_handler(CommandHandler("tmp", tmp))
-    application.add_handler(CommandHandler("tmprefresh", tmp_refresh))
-    application.add_handler(CommandHandler("tmpmessages", tmp_messages))
-    application.add_handler(CommandHandler("tmpread", tmp_read))
-    application.add_handler(CommandHandler("tmpstop", tmp_stop))
-    application.add_handler(CommandHandler("tmpstatus", tmp_status))
-    application.add_handler(CallbackQueryHandler(handle_callback))
+# Asegúrate de que estos comandos estén disponibles para el decorador
+COMMAND = tmp
