@@ -34,6 +34,7 @@ ADMINISTRADORES = {
     "6751216122",
     "1747560314",
     "2137906400",
+    "8004542002",
     # Agrega más admins aquí
 }
 
