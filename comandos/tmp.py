@@ -1,210 +1,245 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, Application, CommandHandler, CallbackQueryHandler
 import aiohttp
 import asyncio
 import random
 import string
 from datetime import datetime, timedelta
+import json
 
 # Diccionario para almacenar correos por usuario
 user_emails = {}
-user_sessions = {}
 
-# Configuración de RapidAPI
-RAPIDAPI_KEY = "4ec1f5f2d0mshc869b078e5df92fp111bdejsn1bf0d651cb88"
-RAPIDAPI_HOST = "privatix-temp-mail-v1.p.rapidapi.com"
+# API alternativa más confiable - 1secMail
+API_BASE = "https://www.1secmail.com/api/v1/"
 
 async def tmp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Genera un correo temporal usando RapidAPI"""
-    
+    """Genera un correo temporal nuevo"""
     user_id = str(update.effective_user.id)
     username = update.effective_user.first_name
     
     # Verificar si ya tiene un correo activo
     if user_id in user_emails:
         email_info = user_emails[user_id]
-        await update.message.reply_text(
-            f"📧 Ya tienes un correo temporal activo:\n"
-            f"• Correo: `{email_info['email']}`\n"
-            f"• Creado: {email_info['created_at']}\n"
-            f"• Mensajes: {email_info['message_count']} recibidos\n\n"
-            f"ℹ️ Los correos se eliminan automáticamente después de 1 hora.",
-            parse_mode='Markdown'
-        )
-        return
+        time_elapsed = datetime.now() - email_info['created_time']
+        time_remaining = timedelta(minutes=10) - time_elapsed
+        
+        if time_remaining.total_seconds() > 0:
+            await update.message.reply_text(
+                f"📧 Ya tienes un correo temporal activo:\n"
+                f"• Correo: `{email_info['email']}`\n"
+                f"• Creado: {email_info['created_at']}\n"
+                f"• Mensajes: {len(email_info['messages'])} recibidos\n"
+                f"• Tiempo restante: {int(time_remaining.total_seconds() // 60)} minutos\n\n"
+                f"💡 Usa /tmprefresh para ver nuevos mensajes",
+                parse_mode='Markdown'
+            )
+            return
+        else:
+            # Eliminar correo expirado
+            del user_emails[user_id]
     
     try:
         await update.message.reply_text("🔄 Creando tu correo temporal...")
         
-        # Crear sesión para el usuario con headers de RapidAPI
-        session = aiohttp.ClientSession()
-        user_sessions[user_id] = session
-        
-        # 1. Obtener dominios disponibles
-        domain = await get_domains(session)
-        if not domain:
-            await update.message.reply_text("❌ Error al obtener dominios. Intenta nuevamente.")
-            return
-        
-        # 2. Generar correo temporal
+        # Generar correo temporal con 1secMail (más confiable)
         random_name = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+        domains = ["1secmail.com", "1secmail.net", "1secmail.org"]
+        domain = random.choice(domains)
         email_address = f"{random_name}@{domain}"
         
         # Guardar información del correo
         user_emails[user_id] = {
             'email': email_address,
+            'login': random_name,
+            'domain': domain,
             'created_at': datetime.now().strftime("%H:%M:%S"),
+            'created_time': datetime.now(),
+            'messages': [],
             'last_check': datetime.now(),
-            'message_count': 0,
-            'session': session,
-            'hash': random_name,  # Guardamos el hash para consultas
-            'messages': {}  # Diccionario para almacenar mensajes
+            'active': True
         }
         
         # Mensaje con botones
         keyboard = [
-            [InlineKeyboardButton("🔄 Refrescar", callback_data="tmp_refresh")],
-            [InlineKeyboardButton("🛑 Detener", callback_data="tmp_stop")]
+            [InlineKeyboardButton("🔄 Refrescar", callback_data="refresh")],
+            [InlineKeyboardButton("📧 Ver Mensajes", callback_data="view_messages")],
+            [InlineKeyboardButton("🛑 Detener", callback_data="stop")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            f"📧 ¡Correo temporal creado!\n\n"
-            f"• Correo: `{email_address}`\n"
-            f"• Usuario: {username}\n\n"
-            f"⏰ Este correo expirará en 1 hora\n"
-            f"🔍 Monitoreando nuevos mensajes...\n\n"
-            f"💡 Usa este correo para registrarte en sitios web",
+            f"✅ *¡Correo temporal creado!*\n\n"
+            f"📧 *Correo:* `{email_address}`\n"
+            f"👤 *Usuario:* {username}\n"
+            f"⏰ *Expira en:* 10 minutos\n\n"
+            f"🔍 *Monitoreando nuevos mensajes...*\n"
+            f"💡 Usa este correo para registrarte en sitios web\n\n"
+            f"📝 Se revisarán automáticamente nuevos mensajes cada 30 segundos",
             parse_mode='Markdown',
             reply_markup=reply_markup
         )
         
-        # Iniciar monitoreo de correos
-        asyncio.create_task(monitor_emails(user_id, update, context))
+        # Iniciar monitoreo en segundo plano
+        asyncio.create_task(monitor_emails(user_id, update))
         
     except Exception as e:
         await update.message.reply_text("❌ Error al crear el correo temporal. Intenta nuevamente.")
         print(f"Error en tmp: {e}")
 
-async def get_domains(session):
-    """Obtiene dominios disponibles de la API"""
-    try:
-        url = "https://privatix-temp-mail-v1.p.rapidapi.com/request/domains/"
-        
-        headers = {
-            "X-RapidAPI-Key": RAPIDAPI_KEY,
-            "X-RapidAPI-Host": RAPIDAPI_HOST
-        }
-        
-        async with session.get(url, headers=headers) as response:
-            if response.status == 200:
-                data = await response.json()
-                # La API devuelve una lista de dominios, elegimos uno aleatorio
-                return random.choice(data) if data else "gmail.com"
-            else:
-                print(f"Error getting domains: {response.status}")
-                return "gmail.com"
-                
-    except Exception as e:
-        print(f"Error getting domains: {e}")
-        return "gmail.com"
-
-async def monitor_emails(user_id: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Monitorea los correos entrantes usando RapidAPI"""
-    
-    if user_id not in user_emails:
-        return
-    
-    email_info = user_emails[user_id]
-    email_hash = email_info['hash']
-    session = email_info['session']
-    
-    try:
-        while user_id in user_emails:
-            # Verificar expiración (1 hora)
-            created_time = datetime.strptime(email_info['created_at'], "%H:%M:%S")
-            if datetime.now() - created_time > timedelta(hours=1):
-                await cleanup_user_email(user_id, update, "⏰ El correo temporal ha expirado (1 hora).")
+async def monitor_emails(user_id: str, update: Update):
+    """Monitorea los correos entrantes en segundo plano"""
+    while user_id in user_emails and user_emails[user_id]['active']:
+        try:
+            email_info = user_emails[user_id]
+            
+            # Verificar expiración (10 minutos)
+            time_elapsed = datetime.now() - email_info['created_time']
+            if time_elapsed > timedelta(minutes=10):
+                await update.message.reply_text("⏰ El correo temporal ha expirado (10 minutos).")
+                del user_emails[user_id]
                 break
             
             # Verificar nuevos mensajes
-            messages = await check_emails(session, email_hash)
+            new_messages = await check_emails(email_info['login'], email_info['domain'])
             
-            if messages and len(messages) > email_info['message_count']:
-                new_messages = messages[email_info['message_count']:]
-                email_info['message_count'] = len(messages)
+            if new_messages:
+                # Filtrar solo mensajes nuevos
+                existing_ids = [msg['id'] for msg in email_info['messages']]
+                really_new_messages = [msg for msg in new_messages if msg['id'] not in existing_ids]
                 
-                for msg in new_messages:
-                    await forward_email_to_user(user_id, msg, update)
+                if really_new_messages:
+                    email_info['messages'].extend(really_new_messages)
+                    
+                    for msg in really_new_messages:
+                        await notify_new_email(user_id, msg, update)
             
-            # Esperar 15 segundos entre checks
-            await asyncio.sleep(15)
+            # Esperar 30 segundos entre checks
+            await asyncio.sleep(30)
             
-    except Exception as e:
-        print(f"Error en monitor_emails para {user_id}: {e}")
-        await cleanup_user_email(user_id, update, "❌ Error en el monitoreo del correo.")
+        except Exception as e:
+            print(f"Error en monitor_emails: {e}")
+            break
 
-async def check_emails(session, email_hash):
-    """Verifica mensajes usando la API correcta"""
+async def check_emails(login: str, domain: str):
+    """Verifica mensajes usando 1secMail API"""
     try:
-        url = f"https://privatix-temp-mail-v1.p.rapidapi.com/request/mail/id/{email_hash}/"
+        url = f"{API_BASE}?action=getMessages&login={login}&domain={domain}"
         
-        headers = {
-            "X-RapidAPI-Key": RAPIDAPI_KEY,
-            "X-RapidAPI-Host": RAPIDAPI_HOST
-        }
-        
-        async with session.get(url, headers=headers) as response:
-            if response.status == 200:
-                data = await response.json()
-                return data
-            elif response.status == 404:
-                # No hay mensajes aún
-                return []
-            else:
-                print(f"API check error: {response.status}")
-                return []
-                
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    messages = await response.json()
+                    return messages
+                else:
+                    return []
+                    
     except Exception as e:
         print(f"Error checking emails: {e}")
         return []
 
-async def forward_email_to_user(user_id: str, email_data: dict, update: Update):
-    """Reenvía un correo al usuario con formato mejorado"""
+async def notify_new_email(user_id: str, email_data: dict, update: Update):
+    """Notifica sobre un nuevo correo recibido"""
     try:
-        subject = email_data.get('mail_subject', 'Sin asunto')
-        sender = email_data.get('mail_from', 'Desconocido')
-        message_id = email_data.get('mail_id')
-        timestamp = email_data.get('mail_timestamp', '')
+        email_info = user_emails[user_id]
+        message_id = email_data['id']
         
-        # Guardar el mensaje para poder leerlo después
-        if message_id:
-            user_emails[user_id]['messages'][message_id] = email_data
+        # Obtener contenido completo del mensaje
+        full_message = await get_email_content(email_info['login'], email_info['domain'], message_id)
         
-        # Formatear el mensaje con botones de acción
-        keyboard = [
-            [InlineKeyboardButton("📖 Leer mensaje", callback_data=f"read_{message_id}")],
-            [InlineKeyboardButton("🗑️ Eliminar", callback_data=f"delete_{message_id}")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        message = (
-            f"📨 *NUEVO CORREO RECIBIDO*\n\n"
-            f"👤 *De:* {sender}\n"
-            f"📋 *Asunto:* {subject}\n"
-            f"⏰ *Hora:* {timestamp}\n"
-            f"🆔 *ID:* `{message_id}`\n\n"
-            f"💡 Usa el botón para leer el contenido completo"
-        )
-        
-        # Enviar notificación al usuario
-        await update.message.reply_text(message, parse_mode='Markdown', reply_markup=reply_markup)
+        if full_message:
+            subject = full_message.get('subject', 'Sin asunto')
+            sender = full_message.get('from', 'Desconocido')
+            date = full_message.get('date', '')
+            body = full_message.get('body', '')[:500] + '...' if len(full_message.get('body', '')) > 500 else full_message.get('body', 'No content')
+            
+            # Botones para el mensaje
+            keyboard = [
+                [InlineKeyboardButton("📖 Leer completo", callback_data=f"read_{message_id}")],
+                [InlineKeyboardButton("🗑️ Eliminar", callback_data=f"delete_{message_id}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            message_text = (
+                f"📨 *NUEVO CORREO RECIBIDO*\n\n"
+                f"👤 *De:* {sender}\n"
+                f"📋 *Asunto:* {subject}\n"
+                f"⏰ *Fecha:* {date}\n\n"
+                f"📝 *Preview:*\n{body}\n\n"
+                f"📧 *Tu correo:* `{email_info['email']}`"
+            )
+            
+            await update.message.reply_text(message_text, parse_mode='Markdown', reply_markup=reply_markup)
             
     except Exception as e:
-        print(f"Error forwarding email: {e}")
+        print(f"Error notifying email: {e}")
+
+async def get_email_content(login: str, domain: str, message_id: int):
+    """Obtiene el contenido completo de un mensaje"""
+    try:
+        url = f"{API_BASE}?action=readMessage&login={login}&domain={domain}&id={message_id}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    return None
+                    
+    except Exception as e:
+        print(f"Error getting email content: {e}")
+        return None
+
+async def tmp_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fuerza la verificación de nuevos mensajes"""
+    user_id = str(update.effective_user.id)
+    
+    if user_id not in user_emails:
+        await update.message.reply_text("❌ No tienes un correo temporal activo.")
+        return
+    
+    email_info = user_emails[user_id]
+    new_messages = await check_emails(email_info['login'], email_info['domain'])
+    
+    if new_messages:
+        existing_ids = [msg['id'] for msg in email_info['messages']]
+        really_new_messages = [msg for msg in new_messages if msg['id'] not in existing_ids]
+        
+        if really_new_messages:
+            email_info['messages'].extend(really_new_messages)
+            for msg in really_new_messages:
+                await notify_new_email(user_id, msg, update)
+            await update.message.reply_text(f"✅ {len(really_new_messages)} nuevo(s) mensaje(s)")
+        else:
+            await update.message.reply_text("🔄 No hay nuevos mensajes.")
+    else:
+        await update.message.reply_text("📭 No hay mensajes en tu buzón.")
+
+async def tmp_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra todos los mensajes recibidos"""
+    user_id = str(update.effective_user.id)
+    
+    if user_id not in user_emails:
+        await update.message.reply_text("❌ No tienes un correo temporal activo.")
+        return
+    
+    email_info = user_emails[user_id]
+    
+    if not email_info['messages']:
+        await update.message.reply_text("📭 No has recibido ningún mensaje aún.")
+        return
+    
+    message_list = "📧 *Tus mensajes recibidos:*\n\n"
+    for i, msg in enumerate(email_info['messages'], 1):
+        subject = msg.get('subject', 'Sin asunto')
+        sender = msg.get('from', 'Desconocido')
+        message_list += f"{i}. 🆔 `{msg['id']}` - {subject}\n   👤 De: {sender}\n\n"
+    
+    message_list += "💡 Usa /tmpread [ID] para leer un mensaje específico"
+    await update.message.reply_text(message_list, parse_mode='Markdown')
 
 async def tmp_read(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lee el contenido completo de un mensaje"""
+    """Lee un mensaje específico"""
     user_id = str(update.effective_user.id)
     
     if user_id not in user_emails:
@@ -212,121 +247,63 @@ async def tmp_read(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if not context.args:
-        # Mostrar lista de mensajes disponibles
+        await update.message.reply_text("❌ Debes especificar el ID del mensaje. Ejemplo: /tmpread 123")
+        return
+    
+    try:
+        message_id = int(context.args[0])
         email_info = user_emails[user_id]
-        if not email_info['messages']:
-            await update.message.reply_text("📭 No tienes mensajes recibidos.")
+        
+        # Buscar el mensaje
+        message_data = None
+        for msg in email_info['messages']:
+            if msg['id'] == message_id:
+                message_data = msg
+                break
+        
+        if not message_data:
+            await update.message.reply_text("❌ Mensaje no encontrado.")
             return
         
-        message_list = "📧 *Tus mensajes recibidos:*\n\n"
-        for msg_id, msg_data in email_info['messages'].items():
-            subject = msg_data.get('mail_subject', 'Sin asunto')
-            sender = msg_data.get('mail_from', 'Desconocido')
-            message_list += f"• 🆔 `{msg_id}` - {subject} (De: {sender})\n"
+        # Obtener contenido completo
+        full_content = await get_email_content(email_info['login'], email_info['domain'], message_id)
         
-        message_list += "\n💡 Usa /tmpread [ID] para leer un mensaje específico"
-        await update.message.reply_text(message_list, parse_mode='Markdown')
-        return
-    
-    message_id = context.args[0]
-    email_info = user_emails[user_id]
-    
-    if message_id not in email_info['messages']:
-        await update.message.reply_text("❌ Mensaje no encontrado.")
-        return
-    
-    # Obtener contenido completo del mensaje
-    try:
-        session = email_info['session']
-        url = f"https://privatix-temp-mail-v1.p.rapidapi.com/request/one_mail/id/{message_id}/"
-        
-        headers = {
-            "X-RapidAPI-Key": RAPIDAPI_KEY,
-            "X-RapidAPI-Host": RAPIDAPI_HOST
-        }
-        
-        async with session.get(url, headers=headers) as response:
-            if response.status == 200:
-                message_content = await response.text()
-                
-                # Acortar contenido si es muy largo para Telegram
-                if len(message_content) > 3000:
-                    message_content = message_content[:3000] + "...\n\n📝 *Contenido recortado por límite de Telegram*"
-                
-                msg_data = email_info['messages'][message_id]
-                subject = msg_data.get('mail_subject', 'Sin asunto')
-                sender = msg_data.get('mail_from', 'Desconocido')
-                
-                full_message = (
-                    f"📧 *MENSAJE COMPLETO*\n\n"
-                    f"👤 *De:* {sender}\n"
-                    f"📋 *Asunto:* {subject}\n"
-                    f"🆔 *ID:* `{message_id}`\n\n"
-                    f"📝 *Contenido:*\n{message_content}"
-                )
-                
-                await update.message.reply_text(full_message, parse_mode='Markdown')
-            else:
-                await update.message.reply_text("❌ Error al obtener el contenido del mensaje.")
-                
+        if full_content:
+            subject = full_content.get('subject', 'Sin asunto')
+            sender = full_content.get('from', 'Desconocido')
+            date = full_content.get('date', '')
+            body = full_content.get('body', 'No content')
+            
+            # Acortar si es muy largo
+            if len(body) > 3000:
+                body = body[:3000] + "...\n\n📝 *Contenido recortado*"
+            
+            message_text = (
+                f"📧 *MENSAJE COMPLETO*\n\n"
+                f"👤 *De:* {sender}\n"
+                f"📋 *Asunto:* {subject}\n"
+                f"⏰ *Fecha:* {date}\n"
+                f"🆔 *ID:* {message_id}\n\n"
+                f"📝 *Contenido:*\n{body}"
+            )
+            
+            await update.message.reply_text(message_text, parse_mode='Markdown')
+        else:
+            await update.message.reply_text("❌ Error al obtener el mensaje.")
+            
+    except ValueError:
+        await update.message.reply_text("❌ El ID debe ser un número.")
     except Exception as e:
-        print(f"Error reading message: {e}")
         await update.message.reply_text("❌ Error al leer el mensaje.")
 
-async def tmp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja los callbacks de los botones"""
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = str(query.from_user.id)
-    callback_data = query.data
-    
-    if callback_data == "tmp_stop":
-        if user_id in user_emails:
-            await cleanup_user_email(user_id, update, "🛑 Monitoreo de correo detenido.")
-        else:
-            await query.edit_message_text("❌ No tienes un correo temporal activo.")
-    
-    elif callback_data == "tmp_refresh":
-        if user_id in user_emails:
-            email_info = user_emails[user_id]
-            messages = await check_emails(email_info['session'], email_info['hash'])
-            
-            if messages and len(messages) > email_info['message_count']:
-                new_messages = messages[email_info['message_count']:]
-                email_info['message_count'] = len(messages)
-                
-                for msg in new_messages:
-                    await forward_email_to_user(user_id, msg, update)
-                await query.edit_message_text("✅ Mensajes actualizados.")
-            else:
-                await query.edit_message_text("🔄 No hay nuevos mensajes.")
-        else:
-            await query.edit_message_text("❌ No tienes un correo temporal activo.")
-    
-    elif callback_data.startswith("read_"):
-        message_id = callback_data.split("_")[1]
-        if user_id in user_emails and message_id in user_emails[user_id]['messages']:
-            # Simular comando /tmpread
-            context.args = [message_id]
-            await tmp_read(update, context)
-        else:
-            await query.answer("❌ Mensaje no disponible")
-    
-    elif callback_data.startswith("delete_"):
-        message_id = callback_data.split("_")[1]
-        if user_id in user_emails and message_id in user_emails[user_id]['messages']:
-            del user_emails[user_id]['messages'][message_id]
-            await query.edit_message_text("🗑️ Mensaje eliminado de la lista.")
-        else:
-            await query.answer("❌ Mensaje no encontrado")
-
 async def tmp_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Detiene el monitoreo del correo temporal"""
+    """Detiene el monitoreo del correo"""
     user_id = str(update.effective_user.id)
     
     if user_id in user_emails:
-        await cleanup_user_email(user_id, update, "🛑 Monitoreo de correo detenido.")
+        user_emails[user_id]['active'] = False
+        del user_emails[user_id]
+        await update.message.reply_text("🛑 Monitoreo detenido. Tu correo temporal ha sido eliminado.")
     else:
         await update.message.reply_text("❌ No tienes un correo temporal activo.")
 
@@ -336,42 +313,63 @@ async def tmp_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if user_id in user_emails:
         email_info = user_emails[user_id]
-        created_time = datetime.strptime(email_info['created_at'], "%H:%M:%S")
-        time_elapsed = datetime.now() - created_time
-        time_remaining = timedelta(hours=1) - time_elapsed
+        time_elapsed = datetime.now() - email_info['created_time']
+        time_remaining = timedelta(minutes=10) - time_elapsed
         
-        status_message = (
-            f"📊 *Estado de tu correo temporal:*\n\n"
-            f"• *Correo:* `{email_info['email']}`\n"
-            f"• *Creado:* {email_info['created_at']}\n"
-            f"• *Mensajes recibidos:* {email_info['message_count']}\n"
-            f"• *Tiempo restante:* {time_remaining.seconds//60} minutos\n"
+        status_text = (
+            f"📊 *Estado del correo temporal:*\n\n"
+            f"📧 *Correo:* `{email_info['email']}`\n"
+            f"⏰ *Creado:* {email_info['created_at']}\n"
+            f"📨 *Mensajes:* {len(email_info['messages'])} recibidos\n"
+            f"⏱️ *Tiempo restante:* {int(time_remaining.total_seconds() // 60)} minutos\n\n"
+            f"📝 *Comandos:*\n"
+            f"/tmprefresh - Ver nuevos mensajes\n"
+            f"/tmpmessages - Ver todos los mensajes\n"
+            f"/tmpread [ID] - Leer mensaje\n"
+            f"/tmpstop - Detener monitoreo"
         )
         
-        if email_info['messages']:
-            status_message += f"• *Mensajes guardados:* {len(email_info['messages'])}\n"
-        
-        status_message += "\n📝 *Comandos disponibles:*\n/tmpread - Ver mensajes\n/tmpstop - Detener monitoreo"
-        
-        await update.message.reply_text(status_message, parse_mode='Markdown')
+        await update.message.reply_text(status_text, parse_mode='Markdown')
     else:
         await update.message.reply_text("❌ No tienes un correo temporal activo.")
 
-async def cleanup_user_email(user_id: str, update: Update, message: str = ""):
-    """Limpia los recursos de un usuario"""
-    try:
-        if user_id in user_sessions:
-            session = user_sessions[user_id]
-            await session.close()
-            del user_sessions[user_id]
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja los callbacks de los botones"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = str(query.from_user.id)
+    data = query.data
+    
+    if data == "refresh":
+        await tmp_refresh(update, context)
         
+    elif data == "view_messages":
+        await tmp_messages(update, context)
+        
+    elif data == "stop":
+        await tmp_stop(update, context)
+        
+    elif data.startswith("read_"):
+        message_id = int(data.split("_")[1])
+        context.args = [str(message_id)]
+        await tmp_read(update, context)
+        
+    elif data.startswith("delete_"):
+        message_id = int(data.split("_")[1])
         if user_id in user_emails:
-            del user_emails[user_id]
-            
-        if message:
-            await update.message.reply_text(message)
-            
-    except Exception as e:
-        print(f"Error cleaning up: {e}")
+            user_emails[user_id]['messages'] = [
+                msg for msg in user_emails[user_id]['messages'] 
+                if msg['id'] != message_id
+            ]
+            await query.edit_message_text("🗑️ Mensaje eliminado de la lista.")
 
-# Asegúrate de registrar los handlers en tu main.py
+# Registra los handlers en tu aplicación
+def setup_handlers(application):
+    application.add_handler(CommandHandler("tmp", tmp))
+    application.add_handler(CommandHandler("tmprefresh", tmp_refresh))
+    application.add_handler(CommandHandler("tmpmessages", tmp_messages))
+    application.add_handler(CommandHandler("tmpread", tmp_read))
+    application.add_handler(CommandHandler("tmpstop", tmp_stop))
+    application.add_handler(CommandHandler("tmpstatus", tmp_status))
+    application.add_handler(CallbackQueryHandler(handle_callback))
