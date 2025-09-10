@@ -171,7 +171,7 @@ def cargar_comandos():
             else:
                 logger.warning(
                     f"⚠️ No se encontró función para '{nombre}'. "
-                    f"Define '{nombre}()' o 'handle()' o 'COMMAND'."
+                    f"Define '{nombre}()' or 'handle()' or 'COMMAND'."
                 )
         except Exception as e:
             logger.error(f"❌ Error cargando comando '{nombre}': {e}", exc_info=True)
@@ -210,7 +210,7 @@ def eliminar_webhook_sincrono(token: str):
             f"https://api.telegram.org/bot{token}/deleteWebhook?drop_pending_updates=true",
             timeout=10,
         )
-        if resp.status_code == 200:
+        if resp.status == 200:
             logger.info("✅ Webhook eliminado correctamente")
         else:
             logger.warning(f"⚠️ No se pudo eliminar webhook: {resp.status_code}")
@@ -311,13 +311,13 @@ def main():
             application.add_handler(CommandHandler(nombre, funcion))
             logger.info(f"📝 Registrado comando: /{nombre}")
 
-        # Registrar callback handler para rmlist
+        # Registrar callback handler para tmp
         try:
-            from comandos.rmlist import rmlist_callback
-            application.add_handler(CallbackQueryHandler(rmlist_callback, pattern="^rmlist_"))
-            logger.info("✅ Callback handler para rmlist registrado")
+            from comandos.tmp import tmp_callback
+            application.add_handler(CallbackQueryHandler(tmp_callback, pattern="^tmp_"))
+            logger.info("✅ Callback handler para tmp registrado")
         except ImportError as e:
-            logger.warning(f"⚠️ No se pudo cargar callback handler para rmlist: {e}")
+            logger.warning(f"⚠️ No se pudo cargar callback handler para tmp: {e}")
         except Exception as e:
             logger.error(f"❌ Error registrando callback handler: {e}")
 
