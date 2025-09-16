@@ -17,11 +17,16 @@ async def me(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         logger.info(f"🔍 Ejecutando comando /me para usuario: {user_id}")
         
-        # Registrar/actualizar usuario
-        registro_exitoso = registrar_usuario(user_id, username, first_name, last_name)
+        # Registrar/actualizar usuario con reintento
+        registro_exitoso = False
+        for intento in range(3):  # 3 intentos
+            registro_exitoso = registrar_usuario(user_id, username, first_name, last_name)
+            if registro_exitoso:
+                break
+            logger.warning(f"⚠️ Intento {intento + 1} fallado para usuario {user_id}")
         
         if not registro_exitoso:
-            await update.message.reply_text("❌ Error al registrar tu usuario.")
+            await update.message.reply_text("❌ Error al registrar tu usuario. Por favor, intenta nuevamente.")
             return
         
         # Obtener información completa
@@ -48,7 +53,8 @@ async def me(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         hours, remainder = divmod(delta.seconds, 3600)
                         minutes, seconds = divmod(remainder, 60)
                         tiempo_restante = f"{days}d-{hours}h-{minutes}m-{seconds}s"
-            except Exception:
+            except Exception as e:
+                logger.warning(f"⚠️ Error calculando tiempo restante para usuario {user_id}: {e}")
                 tiempo_restante = "0d-0h-0m-0s"
         
         # Formatear fecha de registro
@@ -62,7 +68,8 @@ async def me(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     fecha_formateada = fecha_dt.strftime('%d/%m/%y - %I:%M%p').lower()
                 else:
                     fecha_formateada = fecha_registro.strftime('%d/%m/%y - %I:%M%p').lower()
-            except Exception:
+            except Exception as e:
+                logger.warning(f"⚠️ Error formateando fecha para usuario {user_id}: {e}")
                 fecha_formateada = "Desconocida"
         
         # Determinar plan y estado
@@ -91,5 +98,6 @@ async def me(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(respuesta)
         
     except Exception as e:
-        logger.error(f"Error en comando me: {e}")
-        await update.message.reply_text("❌ Error al obtener tu información.")
+        logger.error(f"❌ Error en comando me: {e}")
+        logger.error(f"Traceback: {e.__traceback__}")
+        await update.message.reply_text("❌ Error al obtener tu información. Por favor, intenta nuevamente.")
