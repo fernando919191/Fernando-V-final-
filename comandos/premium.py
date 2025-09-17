@@ -91,6 +91,9 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Obtener información del usuario objetivo
         usuario_obj = obtener_usuario_por_id(target_user_id)
         
+        # Variable para trackear si se creó un nuevo usuario
+        usuario_creado = False
+        
         # Si el usuario no existe en la BD, intentar registrarlo
         if not usuario_obj:
             # Intentar obtener información del usuario de Telegram
@@ -113,11 +116,15 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
                 
                 usuario_obj = obtener_usuario_por_id(target_user_id)
+                usuario_creado = True
+                logger.info(f"✅ Usuario {target_user_id} registrado exitosamente en la base de datos")
                 
             except Exception as e:
                 logger.error(f"Error al obtener info del usuario {target_user_id}: {e}")
                 await update.message.reply_text(f"❌ No se pudo obtener información del usuario {target_user_id}")
                 return
+        else:
+            logger.info(f"ℹ️ Usuario {target_user_id} ya estaba registrado en la base de datos")
         
         # Activar la licencia en el sistema
         exito_licencia = activar_licencia_manual(target_user_id, dias)
@@ -162,6 +169,7 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     dias,
                     target_user_id
                 ))
+                logger.info(f"ℹ️ Registro premium actualizado para usuario {target_user_id}")
             else:
                 # Insertar nuevo registro
                 cursor.execute('''
@@ -177,6 +185,7 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     fecha_expiracion,
                     dias
                 ))
+                logger.info(f"✅ Nuevo registro premium creado para usuario {target_user_id}")
             
             conn.commit()
             conn.close()
@@ -185,9 +194,12 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Error al registrar en tabla premium: {e}")
             await update.message.reply_text("⚠️ Premium activado pero error en registro de auditoría.")
         
-        # Respuesta de éxito
+        # Respuesta de éxito con información del registro
+        estado_registro = "✅ **Nuevo usuario registrado**" if usuario_creado else "ℹ️ **Usuario ya existente**"
+        
         respuesta = (
             f"✅ **Premium Activado Exitosamente**\n\n"
+            f"{estado_registro}\n"
             f"👤 **Usuario ID:** `{target_user_id}`\n"
             f"📛 **Nombre:** {usuario_obj.get('first_name', 'N/A')} {usuario_obj.get('last_name', '')}\n"
             f"🔖 **Username:** @{usuario_obj.get('username', 'N/A')}\n"
@@ -296,3 +308,4 @@ async def desactivar_premium(context, user_id):
             
     except Exception as e:
         logger.error(f"Error al desactivar premium: {e}")
+
