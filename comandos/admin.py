@@ -22,7 +22,7 @@ async def admin(update, context):
     user_id = str(update.effective_user.id)
     
     # Verificar si el usuario es el admin principal
-    if user_id != "6751216122", "1747560314",:
+    if user_id != "6751216122":
         await update.message.reply_text("❌ No tienes permisos para usar este comando.")
         return
     
@@ -52,3 +52,4 @@ async def admin(update, context):
     
 
     await update.message.reply_text(f"✅ El usuario {nuevo_admin} ahora es administrador.")
+
