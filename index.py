@@ -2,6 +2,7 @@
 import os
 import importlib
 import logging
+import asyncio
 from functools import wraps
 
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
@@ -12,6 +13,9 @@ from funcionamiento.tokens import TOKENS
 from funcionamiento.licencias import usuario_tiene_licencia_activa
 from funcionamiento.licencias import canjear_licencia, obtener_tiempo_restante_licencia
 from funcionamiento.usuarios import registrar_usuario
+
+# Importar el procesador de Braintree para manejar el cierre de sesión
+from utils.braintree_processor import braintree_processor
 
 # -------------------------
 # Logging
@@ -52,7 +56,7 @@ COMANDOS_SOLO_ADMIN = {
     "premium",    # Gestión premium
     "remove",     # Remover premium
     "info",
-    "genkey",              # Info de usuario (SOLO ADMIN)
+    "genkey",     # Info de usuario (SOLO ADMIN)
     # Agrega aquí más comandos solo para admins
 }
 
@@ -289,6 +293,15 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"🚨 Error en update {update}: {context.error}", exc_info=True)
 
 
+async def shutdown():
+    """Cleanup tasks on shutdown"""
+    try:
+        await braintree_processor.close_session()
+        logger.info("✅ Sesiones HTTP cerradas correctamente")
+    except Exception as e:
+        logger.error(f"❌ Error cerrando sesiones: {e}")
+
+
 def main():
     try:
         logger.info("🚀 Iniciando bot...")
@@ -335,6 +348,9 @@ def main():
         # Errores globales
         application.add_error_handler(error_handler)
 
+        # Registrar shutdown hook
+        application.post_shutdown(shutdown)
+
         logger.info("🤖 Bot configurado correctamente")
         logger.info(f"👑 Administradores: {ADMINISTRADORES}")
         logger.info(f"🔐 Comandos solo admin: {COMANDOS_SOLO_ADMIN}")
@@ -355,6 +371,8 @@ def main():
 
     except Exception as e:
         logger.error(f"❌ Error crítico: {e}", exc_info=True)
+        # Asegurar cierre de sesiones incluso en caso de error
+        asyncio.run(shutdown())
 
 
 if __name__ == "__main__":
