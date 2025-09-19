@@ -1,27 +1,17 @@
 import re
-import requests
+import aiohttp
+import asyncio
 import logging
 import random
-import time
-from datetime import datetime
 import json
+from datetime import datetime
+from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 class BraintreeProcessor:
     def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Content-Type': 'application/json',
-            'Origin': 'https://www.londonstore.it',
-            'Referer': 'https://www.londonstore.it/checkout',
-            'Connection': 'keep-alive',
-        })
-        
-        # Respuestas predefinidas de Braintree
+        self.session: Optional[aiohttp.ClientSession] = None
         self.responses = [
             {'message': 'Your payment could not be taken. Please try again or use a different payment method. Gateway Rejected: three_d_secure'},
             {'message': 'Your payment could not be taken. Please try again or use a different payment method. Processor Declined'},
@@ -30,7 +20,26 @@ class BraintreeProcessor:
             {'message': 'Payment successful. Thank you for your purchase!'}
         ]
     
-    def parse_cc(self, cc_text):
+    async def get_session(self) -> aiohttp.ClientSession:
+        """Get or create aiohttp session"""
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession(
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': 'application/json, text/plain, */*',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Content-Type': 'application/json',
+                },
+                timeout=aiohttp.ClientTimeout(total=10)
+            )
+        return self.session
+    
+    async def close_session(self):
+        """Close aiohttp session"""
+        if self.session and not self.session.closed:
+            await self.session.close()
+    
+    def parse_cc(self, cc_text: str) -> Optional[Dict]:
         """Parse credit card information from text"""
         patterns = [
             r'(\d{15,16})[\|\\\/](\d{1,2})[\|\\\/](\d{2,4})[\|\\\/](\d{3,4})',
@@ -43,13 +52,9 @@ class BraintreeProcessor:
             if match:
                 cc, mes, ano, cvv = match.groups()
                 
-                # Clean CC number
                 cc = re.sub(r'[\s\-]', '', cc)
-                
-                # Format month to 2 digits
                 mes = mes.zfill(2)
                 
-                # Format year to 4 digits if it's 2 digits
                 if len(ano) == 2:
                     ano = '20' + ano
                 
@@ -62,7 +67,7 @@ class BraintreeProcessor:
                 }
         return None
     
-    def luhn_check(self, card_number):
+    def luhn_check(self, card_number: str) -> bool:
         """Luhn algorithm validation"""
         try:
             digits = [int(d) for d in str(card_number)]
@@ -75,19 +80,16 @@ class BraintreeProcessor:
         except:
             return False
     
-    def check_cc_validity(self, cc_data):
+    def check_cc_validity(self, cc_data: Dict) -> Tuple[bool, str]:
         """Basic credit card validation"""
         cc = cc_data['cc']
         
-        # Check card length
         if len(cc) not in [15, 16]:
             return False, "❌ Longitud de tarjeta inválida"
         
-        # Luhn algorithm check
         if not self.luhn_check(cc):
             return False, "❌ Tarjeta inválida (algoritmo Luhn)"
         
-        # Check expiration date
         try:
             current_year = datetime.now().year
             current_month = datetime.now().month
@@ -104,25 +106,27 @@ class BraintreeProcessor:
         except ValueError:
             return False, "❌ Fecha de expiración inválida"
         
-        # Check CVV length
         cvv = cc_data['cvv']
         if len(cvv) not in [3, 4]:
             return False, "❌ CVV inválido"
         
         return True, "✅ Tarjeta válida"
     
-    def get_bin_info(self, cc_number):
-        """Get BIN information"""
+    async def get_bin_info(self, cc_number: str) -> Optional[Dict]:
+        """Get BIN information asynchronously"""
         bin_code = cc_number[:6]
         try:
-            response = requests.get(f'https://lookup.binlist.net/{bin_code}', timeout=5)
-            if response.status_code == 200:
-                return response.json()
-        except:
-            pass
+            session = await self.get_session()
+            async with session.get(f'https://lookup.binlist.net/{bin_code}', timeout=5) as response:
+                if response.status == 200:
+                    return await response.json()
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout getting BIN info for {bin_code}")
+        except Exception as e:
+            logger.error(f"Error getting BIN info: {e}")
         return None
     
-    def detect_card_type(self, cc_number):
+    def detect_card_type(self, cc_number: str) -> Tuple[str, str]:
         """Detect card type based on BIN"""
         if cc_number.startswith('4'):
             return 'Visa', 'Credit'
@@ -137,41 +141,36 @@ class BraintreeProcessor:
         else:
             return 'Unknown', 'Unknown'
     
-    def simulate_braintree_payment(self, cc_data):
-        """Simulate Braintree payment processing"""
+    async def simulate_braintree_payment(self, cc_data: Dict) -> Tuple[bool, str]:
+        """Simulate Braintree payment processing asynchronously"""
         try:
             # Simulate API call delay
-            time.sleep(2.5)
+            await asyncio.sleep(2.5)
             
-            # Weighted random response (more likely to fail for simulation)
-            weights = [25, 25, 15, 20, 15]  # Probabilidades para cada respuesta
+            # Weighted random response
+            weights = [25, 25, 15, 20, 15]
             response = random.choices(self.responses, weights=weights, k=1)[0]
             
             success = 'successful' in response['message'].lower()
-            
             return success, response['message']
                 
         except Exception as e:
             logger.error(f"Error simulating payment: {e}")
             return False, "❌ Error en el procesamiento del pago"
     
-    def format_response(self, cc_data, validity_result, bin_info, payment_result):
+    def format_response(self, cc_data: Dict, validity_result: Tuple[bool, str], 
+                       bin_info: Optional[Dict], payment_result: Tuple[bool, str]) -> str:
         """Format the response message"""
         valid, validity_msg = validity_result
         payment_success, payment_msg = payment_result
         
-        # Get card info
         card_brand, card_type = self.detect_card_type(cc_data['cc'])
         
-        # Get country from BIN
         country = "N/A"
         if bin_info and bin_info.get('country'):
             country = bin_info['country'].get('name', 'N/A')
         
-        # Format card number for display
         cc_display = f"{cc_data['cc'][:4]} XXXX XXXX {cc_data['cc'][-4:]}"
-        
-        # Emoji for payment status
         status_emoji = "✅" if payment_success else "❌"
         
         response = f"""
