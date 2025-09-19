@@ -14,9 +14,6 @@ from funcionamiento.licencias import usuario_tiene_licencia_activa
 from funcionamiento.licencias import canjear_licencia, obtener_tiempo_restante_licencia
 from funcionamiento.usuarios import registrar_usuario
 
-# Importar el procesador de Braintree para manejar el cierre de sesión
-from utils.braintree_processor import braintree_processor
-
 # -------------------------
 # Logging
 # -------------------------
@@ -296,10 +293,17 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 async def shutdown():
     """Cleanup tasks on shutdown"""
     try:
-        await braintree_processor.close_session()
-        logger.info("✅ Sesiones HTTP cerradas correctamente")
+        # Solo intentar cerrar sesiones si el procesador fue importado
+        try:
+            from utils.braintree_processor import braintree_processor
+            await braintree_processor.close_session()
+            logger.info("✅ Sesiones HTTP cerradas correctamente")
+        except ImportError:
+            logger.info("ℹ️  Módulo braintree_processor no encontrado, omitiendo cierre de sesiones")
+        except Exception as e:
+            logger.error(f"❌ Error cerrando sesiones HTTP: {e}")
     except Exception as e:
-        logger.error(f"❌ Error cerrando sesiones: {e}")
+        logger.error(f"❌ Error en shutdown: {e}")
 
 
 def main():
@@ -348,9 +352,6 @@ def main():
         # Errores globales
         application.add_error_handler(error_handler)
 
-        # Registrar shutdown hook
-        application.post_shutdown(shutdown)
-
         logger.info("🤖 Bot configurado correctamente")
         logger.info(f"👑 Administradores: {ADMINISTRADORES}")
         logger.info(f"🔐 Comandos solo admin: {COMANDOS_SOLO_ADMIN}")
@@ -360,19 +361,40 @@ def main():
         logger.info("📋 Comandos disponibles /: " + ", ".join("/" + c for c in lista))
         logger.info("📋 Comandos disponibles .: " + ", ".join("." + c for c in lista))
 
-        # Polling
+        # Polling - Manejar shutdown manualmente
         logger.info("🔄 Iniciando polling...")
-        application.run_polling(
-            poll_interval=1.0,
-            timeout=30,
-            drop_pending_updates=True,
-            allowed_updates=["message", "callback_query"],
-        )
+        
+        # Crear loop manualmente para manejar shutdown
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # Iniciar polling
+            application.run_polling(
+                poll_interval=1.0,
+                timeout=30,
+                drop_pending_updates=True,
+                allowed_updates=["message", "callback_query"],
+            )
+        except KeyboardInterrupt:
+            logger.info("⏹️  Bot detenido por usuario")
+        except Exception as e:
+            logger.error(f"❌ Error durante polling: {e}")
+        finally:
+            # Ejecutar shutdown siempre
+            loop.run_until_complete(shutdown())
+            loop.close()
 
     except Exception as e:
         logger.error(f"❌ Error crítico: {e}", exc_info=True)
-        # Asegurar cierre de sesiones incluso en caso de error
-        asyncio.run(shutdown())
+        # Ejecutar shutdown incluso en caso de error
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(shutdown())
+            loop.close()
+        except:
+            pass
 
 
 if __name__ == "__main__":
