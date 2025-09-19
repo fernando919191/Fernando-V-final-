@@ -17,7 +17,6 @@ async def br(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Este comando es solo para usuarios premium.")
             return
         
-        # Check if CC data was provided
         if not context.args:
             await update.message.reply_text("""
 ❌ Formato incorrecto. Usa:
@@ -44,14 +43,27 @@ Ejemplo: /br 5265570075484080|04|2027|108
             await update.message.reply_text(f"❌ {validity_result[1]}")
             return
         
-        # Get BIN information
-        bin_info = braintree_processor.get_bin_info(cc_data['cc'])
-        
         # Send processing message
         processing_msg = await update.message.reply_text("⏳ Procesando tarjeta en Braintree...")
         
-        # Process payment
-        payment_result = braintree_processor.simulate_braintree_payment(cc_data)
+        # Get BIN info and process payment concurrently
+        bin_info_task = braintree_processor.get_bin_info(cc_data['cc'])
+        payment_task = braintree_processor.simulate_braintree_payment(cc_data)
+        
+        bin_info, payment_result = await asyncio.gather(
+            bin_info_task,
+            payment_task,
+            return_exceptions=True
+        )
+        
+        # Handle exceptions
+        if isinstance(bin_info, Exception):
+            logger.error(f"Error getting BIN info: {bin_info}")
+            bin_info = None
+        
+        if isinstance(payment_result, Exception):
+            logger.error(f"Error processing payment: {payment_result}")
+            payment_result = (False, "❌ Error en el procesamiento")
         
         # Format and send response
         response = braintree_processor.format_response(cc_data, validity_result, bin_info, payment_result)
