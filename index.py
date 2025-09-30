@@ -49,7 +49,7 @@ COMANDOS_CARGADOS = None
 # -------------------------
 COMANDOS_SOLO_ADMIN = {
     "addkeys",    # Agregar claves
-    "users",      # Listar usuarios  
+    "users",      # Listar usuarios
     "premium",    # Gestión premium
     "remove",     # Remover premium
     "info",
@@ -202,7 +202,7 @@ def cargar_comandos_conversacion(application: Application):
                 application.add_handler(handler)
                 logger.info(f"✅ Comando de conversación cargado: /{nombre}")
         except Exception as e:
-            logger.error(f"❌ Error cargando conversación '{nombre}': {e}", exc_info=True)
+            logger.error(f"❌ Error cargando conversación '{nombre}': {e}")
 
 
 def eliminar_webhook_sincrono(token: str):
@@ -259,9 +259,9 @@ async def manejar_todos_los_mensajes(update: Update, context: ContextTypes.DEFAU
                     if comando in COMANDOS_SOLO_ADMIN:
                         await update.message.reply_text("❌ No tienes permisos para usar este comando.")
                         return
-                    
+
                     # Comandos que requieren licencia
-                    if (comando not in COMANDOS_SIN_LICENCIA and 
+                    if (comando not in COMANDOS_SIN_LICENCIA and
                         not usuario_tiene_licencia_activa(user_id)):
                         await update.message.reply_text(
                             "❌ No tienes una licencia activa.\n\n"
@@ -269,17 +269,19 @@ async def manejar_todos_los_mensajes(update: Update, context: ContextTypes.DEFAU
                             "Contacta con un administrador si necesitas una clave."
                         )
                         return
-                
+
                 logger.info(f"✅ Ejecutando comando: .{comando}")
                 context.args = args  # simular args para handlers
                 await comandos_disponibles[comando](update, context)
                 return
             else:
-                await update.message.reply_text(f"❌ Comando '.{comando}' no reconocido")
+                # ⛔ Cambio: ignorar comandos con punto NO reconocidos (sin responder)
+                logger.info(f"⛔ Comando '.{comando}' no reconocido; ignorado en silencio")
                 return
 
         # MENSAJES NORMALES (NO COMANDOS): NO EXIGIR LICENCIA
         # Los usuarios pueden chatear normalmente sin licencia
+        return
 
     except Exception as e:
         logger.error(f"❌ Error en manejar_todos_los_mensajes: {e}", exc_info=True)
@@ -326,7 +328,7 @@ def main():
         # App Telegram
         application = Application.builder().token(token).build()
 
-        # Registrar comandos /slash
+        # Registrar comandos /slash (solo los existentes)
         for nombre, funcion in comandos.items():
             application.add_handler(CommandHandler(nombre, funcion))
             logger.info(f"📝 Registrado comando: /{nombre}")
@@ -363,11 +365,11 @@ def main():
 
         # Polling - Manejar shutdown manualmente
         logger.info("🔄 Iniciando polling...")
-        
+
         # Crear loop manualmente para manejar shutdown
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
         try:
             # Iniciar polling
             application.run_polling(
