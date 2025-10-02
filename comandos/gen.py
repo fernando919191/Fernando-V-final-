@@ -30,50 +30,148 @@ def procesar_bin_completo(bin_completo: str) -> tuple:
     try:
         # Dividir en partes
         partes = bin_completo.split('|')
-        if len(partes) < 4:
-            return None, None, None, None, "❌ Formato incorrecto. Usa: BIN|MM|AAAA|CVV"
         
-        numero_raw, mes_raw, anio_raw, cvv_raw = partes[:4]
-        
-        # Procesar número de tarjeta
-        numero = generar_numero_tarjeta(numero_raw)
-        if numero.startswith("❌"):
-            return None, None, None, None, numero
-        
-        # Procesar mes
-        if mes_raw.lower() == 'rnd':
+        # Si solo hay una parte, es solo el número/BIN
+        if len(partes) == 1:
+            numero_raw = partes[0]
+            numero = generar_numero_tarjeta(numero_raw)
+            if numero.startswith("❌"):
+                return None, None, None, None, numero
+            
+            # Generar valores por defecto
             mes = f"{random.randint(1,12):02d}"
-        elif mes_raw.isdigit() and 1 <= int(mes_raw) <= 12:
-            mes = f"{int(mes_raw):02d}"
-        else:
-            return None, None, None, None, "❌ Mes inválido. Use 01-12 o 'rnd'"
-        
-        # Procesar año
-        if anio_raw.lower() == 'rnd':
             anio = str(random.randint(2025, 2032))
-        elif anio_raw.isdigit():
-            if len(anio_raw) == 2:
-                anio = "20" + anio_raw
-            elif len(anio_raw) == 4:
-                anio = anio_raw
-            else:
-                return None, None, None, None, "❌ Año inválido. Use 2 o 4 dígitos"
-        else:
-            return None, None, None, None, "❌ Año inválido"
-        
-        # Procesar CVV
-        if cvv_raw.lower() == 'rnd':
-            # Determinar longitud del CVV basado en el tipo de tarjeta
+            
+            # Determinar CVV basado en tipo de tarjeta
             if numero.startswith("3") and len(numero) == 15:
                 cvv = "".join(random.choices("0123456789", k=4))
             else:
                 cvv = "".join(random.choices("0123456789", k=3))
-        elif cvv_raw.isdigit() and len(cvv_raw) in [3, 4]:
-            cvv = cvv_raw
-        else:
-            return None, None, None, None, "❌ CVV inválido. Use 3-4 dígitos o 'rnd'"
+            
+            return numero, mes, anio, cvv, None
         
-        return numero, mes, anio, cvv, None
+        # Formato completo: NUMERO|MM|AAAA|CVV
+        elif len(partes) >= 4:
+            numero_raw, mes_raw, anio_raw, cvv_raw = partes[:4]
+            
+            # Procesar número de tarjeta
+            numero = generar_numero_tarjeta(numero_raw)
+            if numero.startswith("❌"):
+                return None, None, None, None, numero
+            
+            # Procesar mes
+            if mes_raw.lower() in ['rnd', 'random', 'rand']:
+                mes = f"{random.randint(1,12):02d}"
+            elif mes_raw.isdigit() and 1 <= int(mes_raw) <= 12:
+                mes = f"{int(mes_raw):02d}"
+            elif mes_raw == '':
+                mes = f"{random.randint(1,12):02d}"
+            else:
+                return None, None, None, None, "❌ Mes inválido. Use 01-12, 'rnd' o déjelo vacío"
+            
+            # Procesar año
+            if anio_raw.lower() in ['rnd', 'random', 'rand']:
+                anio = str(random.randint(2025, 2032))
+            elif anio_raw.isdigit():
+                if len(anio_raw) == 2:
+                    anio = "20" + anio_raw
+                elif len(anio_raw) == 4:
+                    anio = anio_raw
+                else:
+                    return None, None, None, None, "❌ Año inválido. Use 2 o 4 dígitos"
+            elif anio_raw == '':
+                anio = str(random.randint(2025, 2032))
+            else:
+                return None, None, None, None, "❌ Año inválido"
+            
+            # Procesar CVV
+            if cvv_raw.lower() in ['rnd', 'random', 'rand']:
+                # Determinar longitud del CVV basado en el tipo de tarjeta
+                if numero.startswith("3") and len(numero) == 15:
+                    cvv = "".join(random.choices("0123456789", k=4))
+                else:
+                    cvv = "".join(random.choices("0123456789", k=3))
+            elif cvv_raw.isdigit() and len(cvv_raw) in [3, 4]:
+                cvv = cvv_raw
+            elif cvv_raw == '':
+                if numero.startswith("3") and len(numero) == 15:
+                    cvv = "".join(random.choices("0123456789", k=4))
+                else:
+                    cvv = "".join(random.choices("0123456789", k=3))
+            else:
+                return None, None, None, None, "❌ CVV inválido. Use 3-4 dígitos, 'rnd' o déjelo vacío"
+            
+            return numero, mes, anio, cvv, None
+        
+        # Formatos intermedios (2-3 partes)
+        elif len(partes) == 2:
+            # Formato: BIN|MM
+            numero_raw, mes_raw = partes
+            numero = generar_numero_tarjeta(numero_raw)
+            if numero.startswith("❌"):
+                return None, None, None, None, numero
+            
+            # Procesar mes
+            if mes_raw.lower() in ['rnd', 'random', 'rand']:
+                mes = f"{random.randint(1,12):02d}"
+            elif mes_raw.isdigit() and 1 <= int(mes_raw) <= 12:
+                mes = f"{int(mes_raw):02d}"
+            elif mes_raw == '':
+                mes = f"{random.randint(1,12):02d}"
+            else:
+                return None, None, None, None, "❌ Mes inválido"
+            
+            # Valores por defecto para año y CVV
+            anio = str(random.randint(2025, 2032))
+            if numero.startswith("3") and len(numero) == 15:
+                cvv = "".join(random.choices("0123456789", k=4))
+            else:
+                cvv = "".join(random.choices("0123456789", k=3))
+            
+            return numero, mes, anio, cvv, None
+        
+        elif len(partes) == 3:
+            # Formato: BIN|MM|AAAA
+            numero_raw, mes_raw, anio_raw = partes
+            numero = generar_numero_tarjeta(numero_raw)
+            if numero.startswith("❌"):
+                return None, None, None, None, numero
+            
+            # Procesar mes
+            if mes_raw.lower() in ['rnd', 'random', 'rand']:
+                mes = f"{random.randint(1,12):02d}"
+            elif mes_raw.isdigit() and 1 <= int(mes_raw) <= 12:
+                mes = f"{int(mes_raw):02d}"
+            elif mes_raw == '':
+                mes = f"{random.randint(1,12):02d}"
+            else:
+                return None, None, None, None, "❌ Mes inválido"
+            
+            # Procesar año
+            if anio_raw.lower() in ['rnd', 'random', 'rand']:
+                anio = str(random.randint(2025, 2032))
+            elif anio_raw.isdigit():
+                if len(anio_raw) == 2:
+                    anio = "20" + anio_raw
+                elif len(anio_raw) == 4:
+                    anio = anio_raw
+                else:
+                    return None, None, None, None, "❌ Año inválido"
+            elif anio_raw == '':
+                anio = str(random.randint(2025, 2032))
+            else:
+                return None, None, None, None, "❌ Año inválido"
+            
+            # CVV por defecto
+            if numero.startswith("3") and len(numero) == 15:
+                cvv = "".join(random.choices("0123456789", k=4))
+            else:
+                cvv = "".join(random.choices("0123456789", k=3))
+            
+            return numero, mes, anio, cvv, None
+        
+        else:
+            return None, None, None, None, "❌ Formato incorrecto. Use: BIN o BIN|MM|AAAA|CVV"
         
     except Exception as e:
         logger.error(f"Error procesando BIN completo: {e}")
@@ -88,20 +186,31 @@ def generar_numero_tarjeta(numero_raw: str) -> str:
         # Reemplazar placeholders
         numero_procesado = ""
         for char in numero_limpio:
-            if char.lower() in {'x', 'r'}:
+            if char.lower() in {'x', 'r', 'd'}:
                 numero_procesado += random.choice("0123456789")
             elif char.isdigit():
                 numero_procesado += char
             else:
                 return f"❌ Carácter no válido: {char}"
         
-        # Verificar longitud
-        if len(numero_procesado) not in [15, 16]:
-            return f"❌ Longitud inválida: {len(numero_procesado)} dígitos (debe ser 15 o 16)"
+        # Verificar longitud mínima
+        if len(numero_procesado) < 6:
+            return f"❌ BIN demasiado corto: {len(numero_procesado)} dígitos (mínimo 6)"
         
-        # Aplicar algoritmo de Luhn si es necesario
-        if not tiene_luhn_valido(numero_procesado):
-            numero_procesado = aplicar_luhn(numero_procesado)
+        # Completar hasta longitud estándar si es necesario
+        if len(numero_procesado) < 15:
+            # Determinar longitud objetivo basada en el primer dígito
+            if numero_procesado.startswith('3'):
+                longitud_objetivo = 15  # American Express
+            else:
+                longitud_objetivo = 16  # Visa, Mastercard, etc.
+            
+            # Completar con dígitos aleatorios
+            while len(numero_procesado) < longitud_objetivo - 1:
+                numero_procesado += random.choice("0123456789")
+        
+        # Aplicar algoritmo de Luhn
+        numero_procesado = aplicar_luhn(numero_procesado)
         
         return numero_procesado
         
@@ -115,25 +224,26 @@ def tiene_luhn_valido(numero: str) -> bool:
 
 def aplicar_luhn(numero: str) -> str:
     """Aplica algoritmo de Luhn a un número (sin el último dígito)"""
-    # Si ya tiene longitud completa, reemplazar último dígito
-    if len(numero) in [15, 16]:
-        base = numero[:-1]
-        for i in range(10):
-            posible = base + str(i)
-            if luhn_checksum(posible) == 0:
-                return posible
-        return numero  # Fallback si no se encuentra checksum válido
-    else:
-        # Completar con dígitos aleatorios y aplicar Luhn
-        while len(numero) < 14:  # Dejar espacio para checksum
-            numero += random.choice("0123456789")
-        
-        base = numero
-        for i in range(10):
-            posible = base + str(i)
-            if luhn_checksum(posible) == 0:
-                return posible
-        return base + "0"  # Fallback
+    # Si ya tiene checksum válido, retornar tal cual
+    if tiene_luhn_valido(numero):
+        return numero
+    
+    # Si no, calcular nuevo checksum
+    base = numero[:-1] if len(numero) in [15, 16] else numero
+    
+    for i in range(10):
+        posible = base + str(i)
+        if luhn_checksum(posible) == 0:
+            return posible
+    
+    # Fallback: agregar dígito y recalcular
+    base += random.choice("0123456789")
+    for i in range(10):
+        posible = base + str(i)
+        if luhn_checksum(posible) == 0:
+            return posible
+    
+    return base + "0"  # Último recurso
 
 def luhn_checksum(card_number: str) -> int:
     """Calcula el checksum de Luhn para un número de tarjeta"""
@@ -150,42 +260,14 @@ def luhn_checksum(card_number: str) -> int:
     
     return checksum % 10
 
-def fecha_aleatoria() -> tuple:
-    """Genera una fecha de expiración aleatoria."""
-    mes = f"{random.randint(1,12):02d}"
-    anio = str(random.randint(2025, 2032))
-    return mes, anio
-
-def cvv_aleatorio(longitud: int = 3) -> str:
-    """Genera un CVV aleatorio."""
-    return "".join(random.choices("0123456789", k=longitud))
-
 def generar_tarjeta_completa(bin_input: str) -> str:
     """Genera una tarjeta completa con soporte para formatos avanzados"""
     try:
-        # Verificar si es formato completo: NUMERO|MM|AAAA|CVV
-        if '|' in bin_input:
-            numero, mes, anio, cvv, error = procesar_bin_completo(bin_input)
-            if error:
-                return error
-            return f"{numero}|{mes}|{anio}|{cvv}"
+        numero, mes, anio, cvv, error = procesar_bin_completo(bin_input)
+        if error:
+            return error
         
-        # Formato simple: solo el número/BIN
-        else:
-            numero = generar_numero_tarjeta(bin_input)
-            if numero.startswith("❌"):
-                return numero
-            
-            # Generar fecha y CVV aleatorios
-            mes, anio = fecha_aleatoria()
-            
-            # Determinar longitud del CVV
-            if numero.startswith("3") and len(numero) == 15:
-                cvv = cvv_aleatorio(4)
-            else:
-                cvv = cvv_aleatorio(3)
-            
-            return f"{numero}|{mes}|{anio}|{cvv}"
+        return f"{numero}|{mes}|{anio}|{cvv}"
     
     except Exception as e:
         logger.error(f"Error generando tarjeta completa: {e}")
@@ -240,14 +322,16 @@ async def gen_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         "💳 *Generador de Tarjetas Avanzado*\n\n"
         "Envía el BIN o formato completo:\n\n"
         "📌 *Formatos soportados:*\n"
-        "• `510805` - BIN simple\n"
+        "• `510805` - BIN simple (auto-completado)\n"
         "• `5108xxxx` - BIN con placeholders\n"
-        "• `557910043338xxxx` - BIN largo con placeholders\n"
-        "• `557910043338xxxx|08|2030|123` - Formato completo\n"
+        "• `510805|08` - BIN + Mes específico\n"
+        "• `510805|rnd|2030` - BIN + Mes aleatorio + Año específico\n"
+        "• `510805|08|2030|123` - Formato completo\n"
         "• `510805|rnd|rnd|rnd` - Todo aleatorio\n\n"
         "🔧 *Placeholders:*\n"
-        "• `x` - Dígito aleatorio\n"
-        "• `rnd` - Valor aleatorio (mes, año, CVV)",
+        "• `x`, `r`, `d` - Dígito aleatorio\n"
+        "• `rnd` - Valor aleatorio (mes, año, CVV)\n"
+        "• Campos vacíos - Valor aleatorio automático",
         parse_mode="Markdown"
     )
     return BIN_INPUT
@@ -258,10 +342,18 @@ async def recibir_bin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     context.user_data['bin'] = bin_input
     
     # Validación básica
-    if not bin_input or len(bin_input) < 6:
+    if not bin_input or len(bin_input) < 4:
         await update.message.reply_text(
-            "❌ Input demasiado corto. Mínimo 6 caracteres.\n"
+            "❌ Input demasiado corto. Mínimo 4 caracteres.\n"
             "Envía un BIN válido:"
+        )
+        return BIN_INPUT
+    
+    # Probar si el formato es válido
+    test_result = generar_tarjeta_completa(bin_input)
+    if test_result.startswith("❌"):
+        await update.message.reply_text(
+            f"{test_result}\n\nPor favor, envía un BIN válido:"
         )
         return BIN_INPUT
     
@@ -457,4 +549,5 @@ def setup(application):
 # Handler para el comando tradicional /gen
 async def gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Wrapper para el comando /gen que inicia la conversación."""
+
     return await gen_start(update, context)
